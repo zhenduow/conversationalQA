@@ -1,5 +1,6 @@
 import json
 import csv
+import re
 
 class ConversationDataset():
     '''
@@ -22,11 +23,14 @@ class ConversationDataset():
                 self.conversations[k] = []
                 role = 'User'
                 for utterance in data[k]['utterances']:
+                    if utterance['tags'] == 'GG' or utterance['tags'] == 'JK' or utterance['tags'] == 'GG JK':
+                        continue
                     unprocessed = utterance['utterance']
                     processed = self.processing(unprocessed)
                     if self.conversations[k] == []:
                         self.conversations[k] = [processed]
                     elif utterance['actor_type'] == role:
+                        # concatenate all consecutive utterances from one role together
                         self.conversations[k][-1] += '. '
                         self.conversations[k][-1] += processed
                     else:
@@ -35,9 +39,8 @@ class ConversationDataset():
 
     def processing(self, input_text):
         '''
-        A simple processing function to remove abundant white characters and greeting words like 'hi' and 'thank you'.
+        A simple processing function to preprocess the data.
         '''
-
-        result = input_text.replace('')
-
+        result = re.sub('\s\s+', ' ', input_text) # replace more than one whitespace with one.
+        result = re.sub(r'http\S+', '', result, flags=re.MULTILINE) # remove URL
         return result

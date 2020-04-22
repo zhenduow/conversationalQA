@@ -94,3 +94,21 @@ class User:
             elif is_answer == '1':
                 logging.info('Answer received. Evaluating.')
                 pass
+
+    def initialize_state(self, conversation_id):
+        '''
+        Initialize the user state given the conversation id.
+        '''            
+        initial_query = self.dataset[conversation_id][0]
+        
+    
+    def update_state(self, action):
+        '''
+        Read the agent action and update the user state, compute reward and return them for save.
+        '''
+        if action == 1:
+            # agent answer the question, evaluate the answer
+            pass
+        elif action == 2:
+            # agent asks clarifying question, find corresponding answer in the dataset and return
+            pass

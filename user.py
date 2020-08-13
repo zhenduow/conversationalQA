@@ -12,7 +12,7 @@ class User:
     After the bad question count reaches the patience threshold,
     the user will quit and send back a signal of that.
     '''
-    def __init__(self, dataset, tolerance, patience):
+    def __init__(self, dataset, tolerance, patience, cq_reward, cq_penalty):
         '''
         :param dataset: (class) The dataset. The default MSDialog-complete dataset format is described in 
                         https://ciir.cs.umass.edu/downloads/msdialog/ 
@@ -27,6 +27,8 @@ class User:
         self.tolerance = tolerance
         self.patience = patience
         self.anger = 0
+        self.cq_reward = cq_reward
+        self.cq_penalty = cq_penalty
 
     def respond_to_question(self, conversation_id, question):
         '''
@@ -113,8 +115,18 @@ class User:
         self.anger = 0
         return initial_query
         
+
+    def initialize_pretrain_state(self, conversation_id):
+        '''
+        Initialize the user state given the conversation id.
+        '''
+        final_query = self.dataset[conversation_id][0][:-1] if self.dataset[conversation_id][0][-1] == '\n' else self.dataset[conversation_id][0]    
+        for ut in self.dataset[conversation_id][1:-1]:
+            final_query += ' [SEP] '
+            final_query += ut[:-1] if ut[-1] == '\n' else ut
+        return final_query
     
-    def update_state(self, conversation_id, obs, action, top_n_question, top_n_answer):
+    def update_state(self, conversation_id, obs, action, top_n_question, top_n_answer, use_top_k, ignore_question_list):
         '''
         Read the agent action and update the user state, compute reward and return them for save.
         The agent action should be 0 (retrieve an answer) or 1 (ask clarifying question)
@@ -133,28 +145,30 @@ class User:
             #print(true_rel)
             #print(rel)
             #reward = ndcg_score(np.asarray([true_rel]),  np.asarray([rel]))
-            reward = sum([(n)**2/(id+1) if n else 0 for id,n in enumerate(true_rel)])
-            return obs_, reward, True 
+            reward = sum([(n*n)/(id+1) for id,n in enumerate(true_rel)])
+            if reward >= float(1/use_top_k):
+                reward = 1
+            return obs_, reward, True, -1
         elif action == 1:
             # agent asks clarifying question, find corresponding answer in the dataset and return
             done = False
-            user_response = []
-            question_to_ask = ''
-            for question in top_n_question:
-                response = self.respond_to_question(conversation_id, question)
+            correct_question_id = -1
+            user_response_text = ''
+            for qid in range(len(top_n_question)):
+                response = self.respond_to_question(conversation_id, top_n_question[qid])
                 if type(response) == int:
-                    # it is a good question in the conversation
-                    user_response.append(response) 
+                    continue
                 else:
-                    user_response.append(1)
-                    user_response_text = response
-            #print(user_response)
-            if user_response[0] == 0:
-                # the agent asks a bad question  
-                reward = -10
-                done = True
-                obs_ = obs + ' [SEP] ' + 'This question is not relevant.'
+                    if correct_question_id == -1 and top_n_question[qid] not in set(ignore_question_list):
+                        logging.info("Good CQ.")
+                        correct_question_id = qid
+                        user_response_text = response
+            if 0 <= correct_question_id <= (use_top_k - 1 + len(ignore_question_list)):
+                reward = self.cq_reward
+                obs_ = obs + ' [SEP] ' + top_n_question[correct_question_id] + ' [SEP] ' + user_response_text
             else:
-                reward = 0.01
-                obs_ = obs + ' [SEP] ' + top_n_question[0] + ' [SEP] ' + user_response_text
-            return obs_, reward, done
+                # the agent asks a bad question  
+                reward = self.cq_penalty
+                done = True
+                obs_ = obs + ' [SEP] ' + top_n_question[0] + ' [SEP] ' + 'This question is not relevant.'
+            return obs_, reward, done, correct_question_id

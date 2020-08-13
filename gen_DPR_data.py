@@ -2,13 +2,24 @@ import json
 import csv
 import re
 import numpy as np
+from copy import deepcopy
+import resource
+import glob
+import subprocess
+import random
+
+def limit_memory(maxsize): 
+    soft, hard = resource.getrlimit(resource.RLIMIT_AS) 
+    resource.setrlimit(resource.RLIMIT_AS, (maxsize, hard)) 
 
 response_data = []
 answer_data = []
 question_data = []
 question_id = []
-
 max_len = 360
+all_orders = []
+dataset_size = 1496
+train_size = int(0.8 * dataset_size)
 
 def processing(input_text, max_len):
     '''
@@ -19,96 +30,114 @@ def processing(input_text, max_len):
     result = result[:max_len]
     return result.strip()
 
-with open('MSDialog-Intent.json') as f:
-    data = json.load(f)
 
-    for k in data.keys():
-        final_answer = ''
-        #is_answer_label = [1 if ut['is_answer'] == 1 else 0 for ut in data[k]['utterances']]
-        #has_answer = np.sum(is_answer_label)
-        #if has_answer == 0:
-        #    continue
-        intents = []
-        for utterance in data[k]['utterances']:
-            intents.extend(utterance['tags'].split())
-        if set(['CQ', 'IR', 'FD']) & set(intents):
-            conversations = []
-            role = 'User'
-            for utterance_id, utterance in enumerate(data[k]['utterances']):
-                if set(utterance['tags'].split()).issubset(set(['GG', 'JK', 'PF'])): 
-                    # remove greetings or junk messages
-                    continue
-                unprocessed = utterance['utterance']
-                processed = processing(unprocessed, max_len).strip()
-                if conversations== []:
-                    conversations = [data[k]['title'] + '. [SEP] ' + processed]
-                    #conversations = [processed]
-                elif utterance['actor_type'] == role:
-                    # concatenate all consecutive utterances from one role together
-                    conversations[-1] += '. '
-                    conversations[-1] += processed
-                else:
-                    if utterance['actor_type'] == 'User' and utterance_id == len(data[k]['utterances']) -1 :
-                        break
-                    conversations.append(processed)
-                    
-            # adding any agent response to response pool and update it as the final_answer
-                if utterance['is_answer'] == 1:
-                    final_answer = processed
-                    break
+def generate_orders(current_list, res):
+    if res == []:
+        all_orders.append(current_list)
+    else:
+        for r in range(len(res)):
+            current_list_copy = deepcopy(current_list)
+            current_list_copy.append(res[r])
+            generate_orders(current_list_copy, res[r+1:])
+            
 
-                role = utterance['actor_type']
-        
-            if len(conversations) %2:
-                continue
+def generate_all_query(user_ut, agent_ut):
+    assert len(user_ut) == len(agent_ut)
+    ids = list(range(len(user_ut))[:-1])
+    all_query = [{'question':user_ut[0],'positive_ctxs':[{'title': '', 'text': agent_ut[0]}]}]
+    all_orders[:] = []
+    generate_orders([], ids)
+    for order in all_orders:
+        query = user_ut[0]
+        for o in order:
+            query += ' [SEP] ' + agent_ut[o] + ' [SEP] ' + user_ut[o+1]
+        all_query.append({'question': query, 'positive_ctxs': [{'title': '', 'text': agent_ut[order[-1] + 1]}]})
+    return all_query
 
-            for final_ut_id in range(len(conversations)):
-                if final_ut_id % 2:
-                    if final_ut_id != len(conversations) -1:
-                        response_data.append([k, conversations[final_ut_id], '']) # otherwise append data[k]['title]
-                else:
-                    if final_ut_id == 0:
-                        question_data.append(conversations[final_ut_id])
-                    else:
-                        question_data.append(' [SEP] '.join(conversations[:final_ut_id + 1]))
-                    question_id.append(k)
-                    
-            if final_answer != '':
-                answer_data.append([k, final_answer, '']) 
+question_data = []
+limit_memory(1e11)
+all_data_list = glob.glob('MSDialog-Product/*')
+total = 0
+for data_file in all_data_list:
+    total += 1
+    if total > dataset_size:
+        break
+    f = open(data_file)
+    data = f.readlines()
+    data_id = data_file.split('/')[1]
+    agent_ut = []
+    user_ut = []
+    for line_num in range(len(data)):
+        if line_num % 2:
+            agent_ut.append(data[line_num].strip())
+            if line_num != len(data) - 1:
+                response_data.append([data_id, data[line_num].strip(), ''])
+        else:
+            user_ut.append(data[line_num].strip())
+    
+    # creating training set for question retriever DPR
+    if total <= train_size:
+        negative_conversation = random.choice(all_data_list)
+        try:
+            assert negative_conversation != data_file
+        except:
+            negative_conversation = random.choice(all_data_list)
+        neg_f = open(negative_conversation)
+        neg_data = neg_f.readlines()
+        neg_linenum = [lineid for lineid in range(len(neg_data)) if lineid % 2]
+        all_query = generate_all_query(user_ut, agent_ut)
+        for idx, item in enumerate(all_query):
+            all_query[idx]['negative_ctxs'] = [neg_data[random.choice(neg_linenum)]]
+            all_query[idx]['hard_negative_ctxs'] = [neg_data[random.choice(neg_linenum)]]
+        all_query_id = [data_id] * len(all_query)
+        question_data.extend(all_query)
+        question_id.extend(all_query_id)
+    
 
-# check response pool and answer pool are disjoint. It does happen because Microsoft agents use template answers very occasionally.
-#print(set.intersection(set([i[1] for i in response_data]),set([i[1] for i in answer_data])))
+    answer_data.append([data_id, data[-1], '']) 
 
+'''
 question_response_pair = []
 question_answer_pair = []
 for i in range(len(question_data)):
     question_response_pair.append([question_data[i], [rd[1] for rd in response_data]])
     question_answer_pair.append([question_data[i], [ad[1] for ad in answer_data]])
+'''
 
-with open('DPR_response.tsv', 'w', newline='') as csvfile:
+
+with open('DPR_response_product.tsv', 'w', newline='') as csvfile:
     writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_MINIMAL)
     for i in range(len(response_data)):
         writer.writerow(response_data[i])
 
-with open('DPR_answer.tsv', 'w', newline='') as csvfile:
+with open('DPR_answer_product.tsv', 'w', newline='') as csvfile:
     writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_MINIMAL)
     for i in range(len(answer_data)):
         writer.writerow(answer_data[i])
-
-
-with open('DPR_response_test.csv','w', newline='') as csvfile:
-    writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_MINIMAL)
-    for i in range(len(question_response_pair)):
-        writer.writerow(question_response_pair[i])
-
-with open('DPR_answer_test.csv','w', newline='') as csvfile:
-    writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_MINIMAL)
-    for i in range(len(question_answer_pair)):
-        writer.writerow(question_answer_pair[i])
-
+'''
 with open('DPR_gold','w') as f:
     for i in range(len(question_id)):
         f.write(str(question_id[i]))
         f.write('\n')
+'''
+
+with open('DPR_question_retriever_training','w', newline='') as jsonfile:
+    json.dump(question_data, jsonfile)
+
+'''
+with open('DPR_answer_test.csv','w', newline='') as csvfile:
+    writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_MINIMAL)
+    for i in range(len(question_answer_pair)):
+        writer.writerow(question_answer_pair[i])
+'''
 
 
+subprocess.check_call(["/usr/bin/python3.6", '/raid/zhenduow/conversationalQA/DPR/generate_dense_embeddings.py',\
+        "--model_file", "/raid/zhenduow/conversationalQA/DPR/checkpoint/retriever/multiset/bert-base-encoder.cp",\
+        "--ctx_file", "/raid/zhenduow/conversationalQA/data/DPR_response_product.tsv",\
+        "--out_file", "/raid/zhenduow/conversationalQA/data/response_embeddings_product"])
+
+subprocess.check_call(["/usr/bin/python3.6", '/raid/zhenduow/conversationalQA/DPR/generate_dense_embeddings.py',\
+        "--model_file", "/raid/zhenduow/conversationalQA/DPR/checkpoint/retriever/multiset/bert-base-encoder.cp",\
+        "--ctx_file", "/raid/zhenduow/conversationalQA/data/DPR_answer_product.tsv",\
+        "--out_file", "/raid/zhenduow/conversationalQA/data/answer_embeddings_product"])

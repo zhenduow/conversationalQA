@@ -77,17 +77,20 @@ if __name__ == '__main__':
         train_q0_scores = []
         train_q1_scores = []
         train_q2_scores = []
-
-        for conv_id in train_ids:
-
+        train_worse = []
+        train_q0_worse = []
+        train_q1_worse = []
+        train_q2_worse = []
+        for conv_serial, conv_id in enumerate(train_ids):
             obs = user.initialize_state(conv_id)
             ignore_questions = []
+            n_round = 0
             q_done = False
-
+            print('-------- train conversation %.0f/%.0f --------' % (conv_serial, len(train_ids)))
             while not q_done:
+                print('-------- round %.0f --------' % (n_round))
                 if obs in memory.keys():
                     question, answer = memory[obs][0], memory[obs][1]
-                
                 else:
                     # get retriever results
                     with open(question_retriever_args.qa_file, 'w') as retrieverinput:
@@ -187,17 +190,59 @@ if __name__ == '__main__':
                     question_, answer_ = None, None
 
                 agent.joint_learn((obs, question, answer), answer_reward, question_reward, (obs_, question_, answer_))
+
+                # evaluation
+                if not (action == 1 and not q_done):
+                    train_scores.append(answer_reward)
+                if n_round == 0:
+                    train_q0_scores.append(answer_reward)
+                    train_q0_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                    if q_done:
+                        train_q1_scores.append(0)
+                        train_q2_scores.append(0)
+                        train_q1_worse.append(1)
+                        train_q2_worse.append(1)
+                elif n_round == 1:
+                    train_q1_scores.append(answer_reward)
+                    train_q1_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                    if q_done:
+                        train_q2_scores.append(0)
+                        train_q2_worse.append(1)
+                elif n_round == 2:
+                    train_q2_scores.append(answer_reward)
+                    train_q2_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+
                 obs = obs_
+                n_round += 1
 
 
+        print("Train epoch %.0f, acc %.0f, avgmrr %.6f, worse decisions %.0" % 
+            (i, np.sum([1 if score == 1 else 0 for score in train_scores]), np.mean(train_scores), np.sum(train_worse)))
+        print("q0 acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
+            (np.sum([1 if score == 1 else 0 for score in train_q0_scores]), np.mean(train_q0_scores), np.sum(train_q0_worse)))
+        print("q1 acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
+            (np.sum([1 if score == 1 else 0 for score in train_q1_scores]), np.mean(train_q1_scores), np.sum(train_q1_worse)))
+        print("q2 acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
+            (np.sum([1 if score == 1 else 0 for score in train_q2_scores]), np.mean(train_q2_scores), np.sum(train_q2_worse)))
 
+        ## test
+        test_scores = []
+        test_q0_scores = []
+        test_q1_scores = []
+        test_q2_scores = []
+        test_worse = []
+        test_q0_worse = []
+        test_q1_worse = []
+        test_q2_worse = []
         # test the agent
         for test_id in test_ids:
             obs = user.initialize_state(test_id)
             ignore_questions = []
             q_done = False
-
+            n_round = 0
+            print('-------- test conversation %.0f/%.0f --------' % (conv_serial, len(test_ids)))
             while not q_done:
+                print('-------- round %.0f --------' % (n_round))
                 if obs in memory.keys():
                     question, answer = memory[obs][0], memory[obs][1]
                 
@@ -294,4 +339,35 @@ if __name__ == '__main__':
                 else:
                     question_, answer_ = None, None
 
+                # evaluation
+                if not (action == 1 and not q_done):
+                    test_scores.append(answer_reward)
+                if n_round == 0:
+                    test_q0_scores.append(answer_reward)
+                    test_q0_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                    if q_done:
+                        test_q1_scores.append(0)
+                        test_q2_scores.append(0)
+                        test_q1_worse.append(1)
+                        test_q2_worse.append(1)
+                elif n_round == 1:
+                    test_q1_scores.append(answer_reward)
+                    test_q1_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                    if q_done:
+                        test_q2_scores.append(0)
+                        test_q2_worse.append(1)
+                elif n_round == 2:
+                    test_q2_scores.append(answer_reward)
+                    test_q2_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+
+                n_round += 1
                 obs = obs_
+
+        print("Test epoch %.0f, acc %.0f, avgmrr %.6f, worse decisions %.0" % 
+            (i, np.sum([1 if score == 1 else 0 for score in test_scores]), np.mean(test_scores), np.sum(test_worse)))
+        print("q0 acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
+            (np.sum([1 if score == 1 else 0 for score in test_q0_scores]), np.mean(test_q0_scores), np.sum(test_q0_worse)))
+        print("q1 acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
+            (np.sum([1 if score == 1 else 0 for score in test_q1_scores]), np.mean(test_q1_scores), np.sum(test_q1_worse)))
+        print("q2 acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
+            (np.sum([1 if score == 1 else 0 for score in test_q2_scores]), np.mean(test_q2_scores), np.sum(test_q2_worse)))

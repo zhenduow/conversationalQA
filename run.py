@@ -19,12 +19,12 @@ cq_reward = 0.49
 cq_penalty = -0.5
 agent_gamma = 0.25
 pretrain_iter = 3
-train_iter = 3
-dataset_size = 20
+train_iter = 10
+dataset_size = 1496
 train_test_split_ratio = 0.8
 train_size = int(train_test_split_ratio * dataset_size)
 use_top_k = 1
-exp_name = 'mini'
+exp_name = 'product'
 
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
@@ -107,11 +107,11 @@ if __name__ == '__main__':
 
                     retrieved_question = [rq for rq in retrieved_question if rq not in ignore_questions]
 
-                    with open('retrieved_question', 'w') as qrerankerinput:
+                    with open('/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_question', 'w') as qrerankerinput:
                         for rq in retrieved_question:
                             qrerankerinput.write(rq)
                             qrerankerinput.write('\n')
-                    with open('retrieved_answer', 'w') as arerankerinput:
+                    with open('/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_answer', 'w') as arerankerinput:
                         for ra in retrieved_answer:
                             arerankerinput.write(ra)
                             arerankerinput.write('\n')
@@ -120,12 +120,12 @@ if __name__ == '__main__':
                     question = Interactive.main(model = 'transformer/polyencoder', \
                         model_file = 'zoo:pretrained_transformers/model_poly/msdialogquestion',  \
                         encode_candidate_vecs = 'true', eval_candidates ='fixed',  \
-                        fixed_candidates_path = 'retrieved_question', \
+                        fixed_candidates_path = '/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_question', \
                         human_input=obs, fixed_candidate_vecs = 'replace')
                     answer = Interactive.main(model = 'transformer/polyencoder', \
                         model_file = 'zoo:pretrained_transformers/model_poly/msdialogmodel',  \
                         encode_candidate_vecs = 'true', eval_candidates ='fixed',  \
-                        fixed_candidates_path = 'retrieved_answer', \
+                        fixed_candidates_path = '/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_answer', \
                         human_input=obs,  fixed_candidate_vecs = 'replace')
                     
                     memory[obs] = [question, answer]
@@ -159,11 +159,11 @@ if __name__ == '__main__':
 
                         retrieved_question = [rq for rq in retrieved_question if rq not in ignore_questions]
 
-                        with open('retrieved_question', 'w') as qrerankerinput:
+                        with open('/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_question', 'w') as qrerankerinput:
                             for rq in retrieved_question:
                                 qrerankerinput.write(rq)
                                 qrerankerinput.write('\n')
-                        with open('retrieved_answer', 'w') as arerankerinput:
+                        with open('/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_answer', 'w') as arerankerinput:
                             for ra in retrieved_answer:
                                 arerankerinput.write(ra)
                                 arerankerinput.write('\n')
@@ -172,12 +172,12 @@ if __name__ == '__main__':
                         question_ = Interactive.main(model = 'transformer/polyencoder', \
                             model_file = 'zoo:pretrained_transformers/model_poly/msdialogquestion',  \
                             encode_candidate_vecs = 'true', eval_candidates ='fixed',  \
-                            fixed_candidates_path = 'retrieved_question', \
+                            fixed_candidates_path = '/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_question', \
                             human_input=obs_, fixed_candidate_vecs = 'replace')
                         answer_ = Interactive.main(model = 'transformer/polyencoder', \
                             model_file = 'zoo:pretrained_transformers/model_poly/msdialogmodel',  \
                             encode_candidate_vecs = 'true', eval_candidates ='fixed',  \
-                            fixed_candidates_path = 'retrieved_answer', \
+                            fixed_candidates_path = '/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_answer', \
                             human_input=obs_,  fixed_candidate_vecs = 'replace')
                         
                         memory[obs_] = [question_, answer_]
@@ -190,7 +190,11 @@ if __name__ == '__main__':
                 # evaluation
                 if (action == 0 or (action == 1 and question_reward == cq_penalty)) and not stop:
                     stop = True
-                    train_scores.append(answer_reward)
+                    train_scores.append(answer_reward if action == 0 else 0)
+                    if action == 0 and answer_reward == 1.0:
+                        train_correct.append(conv_id) 
+                    train_worse.append(1 if (action == 0 and answer_reward < float(1/use_top_k) and question_reward == cq_reward) \
+                        or (action == 1 and question_reward == cq_penalty) else 0)
                 if n_round == 0:
                     train_q0_scores.append(answer_reward)
                     train_q0_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
@@ -222,9 +226,6 @@ if __name__ == '__main__':
         assert len(train_scores) == len(train_q0_scores)
         assert len(train_q1_scores) == len(train_q0_scores)
         assert len(train_q1_scores) == len(train_q2_scores)
-        assert len(train_worse) == len(train_q0_worse)
-        assert len(train_q1_worse) == len(train_q0_worse)
-        assert len(train_q1_worse) == len(train_q2_worse)
 
         print("Train epoch %.0f, acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
             (i, np.sum([1 if score == 1 else 0 for score in train_scores]), np.mean(train_scores), np.sum(train_worse)))
@@ -274,11 +275,11 @@ if __name__ == '__main__':
 
                     retrieved_question = [rq for rq in retrieved_question if rq not in ignore_questions]
 
-                    with open('retrieved_question', 'w') as qrerankerinput:
+                    with open('/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_question', 'w') as qrerankerinput:
                         for rq in retrieved_question:
                             qrerankerinput.write(rq)
                             qrerankerinput.write('\n')
-                    with open('retrieved_answer', 'w') as arerankerinput:
+                    with open('/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_answer', 'w') as arerankerinput:
                         for ra in retrieved_answer:
                             arerankerinput.write(ra)
                             arerankerinput.write('\n')
@@ -287,12 +288,12 @@ if __name__ == '__main__':
                     question = Interactive.main(model = 'transformer/polyencoder', \
                         model_file = 'zoo:pretrained_transformers/model_poly/msdialogquestion',  \
                         encode_candidate_vecs = 'true', eval_candidates ='fixed',  \
-                        fixed_candidates_path = 'retrieved_question', \
+                        fixed_candidates_path = '/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_question', \
                         human_input=obs, fixed_candidate_vecs = 'replace')
                     answer = Interactive.main(model = 'transformer/polyencoder', \
                         model_file = 'zoo:pretrained_transformers/model_poly/msdialogmodel',  \
                         encode_candidate_vecs = 'true', eval_candidates ='fixed',  \
-                        fixed_candidates_path = 'retrieved_answer', \
+                        fixed_candidates_path = '/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_answer', \
                         human_input=obs,  fixed_candidate_vecs = 'replace')
                     
                     memory[obs] = [question, answer]
@@ -325,11 +326,11 @@ if __name__ == '__main__':
 
                         retrieved_question = [rq for rq in retrieved_question if rq not in ignore_questions]
 
-                        with open('retrieved_question', 'w') as qrerankerinput:
+                        with open('/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_question', 'w') as qrerankerinput:
                             for rq in retrieved_question:
                                 qrerankerinput.write(rq)
                                 qrerankerinput.write('\n')
-                        with open('retrieved_answer', 'w') as arerankerinput:
+                        with open('/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_answer', 'w') as arerankerinput:
                             for ra in retrieved_answer:
                                 arerankerinput.write(ra)
                                 arerankerinput.write('\n')
@@ -338,12 +339,12 @@ if __name__ == '__main__':
                         question_ = Interactive.main(model = 'transformer/polyencoder', \
                             model_file = 'zoo:pretrained_transformers/model_poly/msdialogquestion',  \
                             encode_candidate_vecs = 'true', eval_candidates ='fixed',  \
-                            fixed_candidates_path = 'retrieved_question', \
+                            fixed_candidates_path = '/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_question', \
                             human_input=obs_, fixed_candidate_vecs = 'replace')
                         answer_ = Interactive.main(model = 'transformer/polyencoder', \
                             model_file = 'zoo:pretrained_transformers/model_poly/msdialogmodel',  \
                             encode_candidate_vecs = 'true', eval_candidates ='fixed',  \
-                            fixed_candidates_path = 'retrieved_answer', \
+                            fixed_candidates_path = '/raid/zhenduow/conversationalQA/data/' + exp_name + '/retrieved_answer', \
                             human_input=obs_,  fixed_candidate_vecs = 'replace')
                         
                         memory[obs_] = [question_, answer_]
@@ -354,7 +355,11 @@ if __name__ == '__main__':
                 # evaluation
                 if (action == 0 or (action == 1 and question_reward == cq_penalty)) and not stop:
                     stop = True
-                    test_scores.append(answer_reward)
+                    test_scores.append(answer_reward if action == 0 else 0)
+                    if action == 0 and answer_reward == 1.0:
+                        test_correct.append(test_id)
+                    test_worse.append(1 if (action == 0 and answer_reward < float(1/use_top_k) and question_reward == cq_reward) \
+                        or (action == 1 and question_reward == cq_penalty) else 0)
                 if n_round == 0:
                     test_q0_scores.append(answer_reward)
                     test_q0_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
@@ -385,10 +390,6 @@ if __name__ == '__main__':
         assert len(test_scores) == len(test_q0_scores)
         assert len(test_q1_scores) == len(test_q0_scores)
         assert len(test_q1_scores) == len(test_q2_scores)
-        
-        assert len(test_worse) == len(test_q0_worse)
-        assert len(test_q1_worse) == len(test_q0_worse)
-        assert len(test_q1_worse) == len(test_q2_worse)
 
         print("Test epoch %.0f, acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
             (i, np.sum([1 if score == 1 else 0 for score in test_scores]), np.mean(test_scores), np.sum(test_worse)))

@@ -11,7 +11,7 @@ from parlai.scripts.interactive import Interactive
 from copy import deepcopy
 import argparse
 from DPR import *
-from DPR.dpr.options import add_encoder_params, setup_args_gpu, print_args, set_encoder_params_from_state, add_tokenizer_params, add_cuda_params
+from DPR.dpr.options import add_encoder_params, setup_args_gpu, set_encoder_params_from_state, add_tokenizer_params, add_cuda_params
 from DPR.dense_retriever import main, retrieve
 observation_dim = 768
 action_num = 2
@@ -19,12 +19,12 @@ cq_reward = 0.49
 cq_penalty = -0.5
 agent_gamma = 0.25
 pretrain_iter = 3
-train_iter = 10
-dataset_size = 1496
+train_iter = 3
+dataset_size = 20
 train_test_split_ratio = 0.8
 train_size = int(train_test_split_ratio * dataset_size)
 use_top_k = 1
-exp_name = 'product'
+exp_name = 'mini'
 
 if __name__ == '__main__':
     logging.getLogger().setLevel(logging.INFO)
@@ -73,19 +73,15 @@ if __name__ == '__main__':
 
 
     for i in range(train_iter):
-        train_scores = []
-        train_q0_scores = []
-        train_q1_scores = []
-        train_q2_scores = []
-        train_worse = []
-        train_q0_worse = []
-        train_q1_worse = []
-        train_q2_worse = []
+        train_scores, train_q0_scores, train_q1_scores, train_q2_scores = [],[],[],[]
+        train_worse, train_q0_worse, train_q1_worse, train_q2_worse = [],[],[],[]
+        train_correct, train_q0_correct, train_q1_correct, train_q2_correct = [],[],[],[]
         for conv_serial, conv_id in enumerate(train_ids):
             obs = user.initialize_state(conv_id)
             ignore_questions = []
             n_round = 0
             q_done = False
+            stop = False
             print('-------- train conversation %.0f/%.0f --------' % (conv_serial, len(train_ids)))
             while not q_done:
                 print('-------- round %.0f --------' % (n_round))
@@ -135,10 +131,10 @@ if __name__ == '__main__':
                     memory[obs] = [question, answer]
 
                 action = agent.choose_action(obs, question, answer)
-                _, answer_reward, _, _ = user.update_state(conv_id, obs, 0, question, answer, use_top_k = use_top_k)
                 obs_, question_reward, q_done, good_question = user.update_state(conv_id, obs, 1, question, answer, use_top_k = use_top_k)
+                _, answer_reward, _, _ = user.update_state(conv_id, obs, 0, question, answer, use_top_k = use_top_k)
                 action_reward = [answer_reward, question_reward][action]
-                print('answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
+                print('action', action, 'answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
 
                 if not q_done:
                     ignore_questions.append(good_question)
@@ -149,7 +145,7 @@ if __name__ == '__main__':
                         
                         with open(question_retriever_args.qa_file, 'w') as retrieverinput:
                             riwriter = csv.writer(retrieverinput, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-                            riwriter.writerow([obs, ['']])
+                            riwriter.writerow([obs_, ['']])
 
                         retrieve(question_retriever_args, question_retriever, question_index_buffer_sz)
                         retrieve(answer_retriever_args, answer_retriever, answer_index_buffer_sz)
@@ -192,11 +188,14 @@ if __name__ == '__main__':
                 agent.joint_learn((obs, question, answer), answer_reward, question_reward, (obs_, question_, answer_))
 
                 # evaluation
-                if not (action == 1 and not q_done):
+                if (action == 0 or (action == 1 and question_reward == cq_penalty)) and not stop:
+                    stop = True
                     train_scores.append(answer_reward)
                 if n_round == 0:
                     train_q0_scores.append(answer_reward)
                     train_q0_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                    if answer_reward == 1:
+                        train_q0_correct.append(conv_id)
                     if q_done:
                         train_q1_scores.append(0)
                         train_q2_scores.append(0)
@@ -205,18 +204,29 @@ if __name__ == '__main__':
                 elif n_round == 1:
                     train_q1_scores.append(answer_reward)
                     train_q1_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                    if answer_reward == 1:
+                        train_q1_correct.append(conv_id)
                     if q_done:
                         train_q2_scores.append(0)
                         train_q2_worse.append(1)
                 elif n_round == 2:
                     train_q2_scores.append(answer_reward)
                     train_q2_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                    if answer_reward == 1:
+                        train_q2_correct.append(conv_id)
 
                 obs = obs_
                 n_round += 1
 
 
-        print("Train epoch %.0f, acc %.0f, avgmrr %.6f, worse decisions %.0" % 
+        assert len(train_scores) == len(train_q0_scores)
+        assert len(train_q1_scores) == len(train_q0_scores)
+        assert len(train_q1_scores) == len(train_q2_scores)
+        assert len(train_worse) == len(train_q0_worse)
+        assert len(train_q1_worse) == len(train_q0_worse)
+        assert len(train_q1_worse) == len(train_q2_worse)
+
+        print("Train epoch %.0f, acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
             (i, np.sum([1 if score == 1 else 0 for score in train_scores]), np.mean(train_scores), np.sum(train_worse)))
         print("q0 acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
             (np.sum([1 if score == 1 else 0 for score in train_q0_scores]), np.mean(train_q0_scores), np.sum(train_q0_worse)))
@@ -224,21 +234,21 @@ if __name__ == '__main__':
             (np.sum([1 if score == 1 else 0 for score in train_q1_scores]), np.mean(train_q1_scores), np.sum(train_q1_worse)))
         print("q2 acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
             (np.sum([1 if score == 1 else 0 for score in train_q2_scores]), np.mean(train_q2_scores), np.sum(train_q2_worse)))
+        print(train_correct)
+        print(train_q0_correct)
+        print(train_q1_correct)
+        print(train_q2_correct)
 
         ## test
-        test_scores = []
-        test_q0_scores = []
-        test_q1_scores = []
-        test_q2_scores = []
-        test_worse = []
-        test_q0_worse = []
-        test_q1_worse = []
-        test_q2_worse = []
+        test_scores, test_q0_scores, test_q1_scores, test_q2_scores = [],[],[],[]
+        test_worse, test_q0_worse, test_q1_worse,test_q2_worse = [],[],[],[]
+        test_correct, test_q0_correct, test_q1_correct, test_q2_correct = [],[],[],[]
         # test the agent
-        for test_id in test_ids:
+        for conv_serial, test_id in enumerate(test_ids):
             obs = user.initialize_state(test_id)
             ignore_questions = []
             q_done = False
+            stop = False
             n_round = 0
             print('-------- test conversation %.0f/%.0f --------' % (conv_serial, len(test_ids)))
             while not q_done:
@@ -249,7 +259,8 @@ if __name__ == '__main__':
                 else:
                     # get retriever results
                     with open(question_retriever_args.qa_file, 'w') as retrieverinput:
-                        retrieverinput.write(obs)
+                        riwriter = csv.writer(retrieverinput, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                        riwriter.writerow([obs, ['']])
 
                     retrieve(question_retriever_args, question_retriever, question_index_buffer_sz)
                     retrieve(answer_retriever_args, answer_retriever, answer_index_buffer_sz)
@@ -287,10 +298,10 @@ if __name__ == '__main__':
                     memory[obs] = [question, answer]
 
                 action = agent.choose_action(obs, question, answer)
-                _, answer_reward, _, _ = user.update_state(test_id, obs, 0, question, answer, use_top_k = use_top_k)
                 obs_, question_reward, q_done, good_question = user.update_state(test_id, obs, 1, question, answer, use_top_k = use_top_k)
+                _, answer_reward, _, _ = user.update_state(test_id, obs, 0, question, answer, use_top_k = use_top_k)
                 action_reward = [answer_reward, question_reward][action]
-                print('answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
+                print('action', action, 'answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
 
                 if not q_done:
                     ignore_questions.append(good_question)
@@ -299,10 +310,11 @@ if __name__ == '__main__':
                     else:
                         # get retriever results
                         with open(question_retriever_args.qa_file, 'w') as retrieverinput:
-                            retrieverinput.write(obs_)
+                            riwriter = csv.writer(retrieverinput, delimiter='\t', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+                            riwriter.writerow([obs_, ['']])
 
-                        retrieve(question_retriever_args, retriever, index_buffer_sz)
-                        retrieve(answer_retriever_args, retriever, index_buffer_sz)
+                        retrieve(question_retriever_args, question_retriever, question_index_buffer_sz)
+                        retrieve(answer_retriever_args, answer_retriever, answer_index_buffer_sz)
 
                         with open(answer_retriever_args.out_file) as question_f:
                             jsondata = json.load(question_f)
@@ -340,11 +352,14 @@ if __name__ == '__main__':
                     question_, answer_ = None, None
 
                 # evaluation
-                if not (action == 1 and not q_done):
+                if (action == 0 or (action == 1 and question_reward == cq_penalty)) and not stop:
+                    stop = True
                     test_scores.append(answer_reward)
                 if n_round == 0:
                     test_q0_scores.append(answer_reward)
                     test_q0_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                    if answer_reward == 1:
+                        test_q0_correct.append(test_id)
                     if q_done:
                         test_q1_scores.append(0)
                         test_q2_scores.append(0)
@@ -353,17 +368,29 @@ if __name__ == '__main__':
                 elif n_round == 1:
                     test_q1_scores.append(answer_reward)
                     test_q1_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                    if answer_reward == 1:
+                        test_q1_correct.append(test_id)
                     if q_done:
                         test_q2_scores.append(0)
                         test_q2_worse.append(1)
                 elif n_round == 2:
                     test_q2_scores.append(answer_reward)
                     test_q2_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                    if answer_reward == 1:
+                        test_q2_correct.append(test_id)
 
                 n_round += 1
                 obs = obs_
 
-        print("Test epoch %.0f, acc %.0f, avgmrr %.6f, worse decisions %.0" % 
+        assert len(test_scores) == len(test_q0_scores)
+        assert len(test_q1_scores) == len(test_q0_scores)
+        assert len(test_q1_scores) == len(test_q2_scores)
+        
+        assert len(test_worse) == len(test_q0_worse)
+        assert len(test_q1_worse) == len(test_q0_worse)
+        assert len(test_q1_worse) == len(test_q2_worse)
+
+        print("Test epoch %.0f, acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
             (i, np.sum([1 if score == 1 else 0 for score in test_scores]), np.mean(test_scores), np.sum(test_worse)))
         print("q0 acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
             (np.sum([1 if score == 1 else 0 for score in test_q0_scores]), np.mean(test_q0_scores), np.sum(test_q0_worse)))
@@ -371,3 +398,7 @@ if __name__ == '__main__':
             (np.sum([1 if score == 1 else 0 for score in test_q1_scores]), np.mean(test_q1_scores), np.sum(test_q1_worse)))
         print("q2 acc %.0f, avgmrr %.6f, worse decisions %.0f" % 
             (np.sum([1 if score == 1 else 0 for score in test_q2_scores]), np.mean(test_q2_scores), np.sum(test_q2_worse)))
+        print(test_correct)
+        print(test_q0_correct)
+        print(test_q1_correct)
+        print(test_q2_correct)

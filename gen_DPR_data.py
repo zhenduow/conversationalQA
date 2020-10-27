@@ -15,11 +15,9 @@ def limit_memory(maxsize):
 response_data = []
 answer_data = []
 question_data = []
-question_id = []
-max_len = 360
+DPR_answer_training = []
+max_len = 512
 all_orders = []
-dataset_size = 1496
-train_size = int(0.8 * dataset_size)
 
 def processing(input_text, max_len):
     '''
@@ -51,93 +49,114 @@ def generate_all_query(user_ut, agent_ut):
         query = user_ut[0]
         for o in order:
             query += ' [SEP] ' + agent_ut[o] + ' [SEP] ' + user_ut[o+1]
-        all_query.append({'question': query, 'positive_ctxs': [{'title': '', 'text': agent_ut[order[-1] + 1]}]})
+        try:
+            all_query.append({'question': query, 'positive_ctxs': [{'title': '', 'text': agent_ut[order[-1] + 1]}]})
+        except:
+            pass
     return all_query
 
 question_data = []
 limit_memory(1e11)
-all_data_list = glob.glob('MSDialog-Product/*')
-total = 0
+all_data_list = glob.glob('MSDialog-Answer/train/*')
 for data_file in all_data_list:
-    total += 1
-    if total > dataset_size:
-        break
     f = open(data_file)
     data = f.readlines()
     data_id = data_file.split('/')[1]
     agent_ut = []
     user_ut = []
+    final_query = data[0]
     for line_num in range(len(data)):
         if line_num % 2:
             agent_ut.append(data[line_num].strip())
             if line_num != len(data) - 1:
                 response_data.append([data_id, data[line_num].strip(), ''])
+            final_query += ' [SEP] ' + data[line_num].strip()
         else:
             user_ut.append(data[line_num].strip())
+            if line_num > 0:
+                final_query += ' [SEP] ' + data[line_num].strip()
     
     # creating training set for question retriever DPR
-    if total <= train_size:
-        negative_conversation = random.choice(all_data_list)
-        try:
-            assert negative_conversation != data_file
-        except:
-            negative_conversation = random.choice(all_data_list)
-        neg_f = open(negative_conversation)
-        neg_data = neg_f.readlines()
-        neg_linenum = [lineid for lineid in range(len(neg_data)) if lineid % 2]
-        all_query = generate_all_query(user_ut, agent_ut)
-        for idx, item in enumerate(all_query):
-            all_query[idx]['negative_ctxs'] = [neg_data[random.choice(neg_linenum)]]
-            all_query[idx]['hard_negative_ctxs'] = [neg_data[random.choice(neg_linenum)]]
-        all_query_id = [data_id] * len(all_query)
-        question_data.extend(all_query)
-        question_id.extend(all_query_id)
     
+    negative_conversation = random.choice(all_data_list)
+    try:
+        assert negative_conversation != data_file
+    except:
+        negative_conversation = random.choice(all_data_list)
+    neg_f = open(negative_conversation)
+    neg_data = neg_f.readlines()
+    neg_linenum = [lineid for lineid in range(len(neg_data)) if lineid % 2]
+    all_query = generate_all_query(user_ut, agent_ut)
+    for idx, item in enumerate(all_query):
+        all_query[idx]['negative_ctxs'] = [neg_data[random.choice(neg_linenum)]]
+        all_query[idx]['hard_negative_ctxs'] = [neg_data[random.choice(neg_linenum)]]
+    question_data.extend(all_query)
 
     answer_data.append([data_id, data[-1], '']) 
 
-'''
-question_response_pair = []
-question_answer_pair = []
-for i in range(len(question_data)):
-    question_response_pair.append([question_data[i], [rd[1] for rd in response_data]])
-    question_answer_pair.append([question_data[i], [ad[1] for ad in answer_data]])
-'''
+    DPR_answer_training.append({'question': final_query, 'positive_ctxs': [{'title': '', 'text': agent_ut[-1]}], 'negative_ctxs': [neg_data[-1]], 'hard_negative_ctxs': [neg_data[-1]]}) 
 
 
-with open('DPR_response_product.tsv', 'w', newline='') as csvfile:
+
+all_data_list = glob.glob('MSDialog-Incomplete/*')
+for data_file in all_data_list:
+    f = open(data_file)
+    data = f.readlines()
+    data_id = data_file.split('/')[1]
+    agent_ut = []
+    user_ut = []
+    final_query = data[0]
+    for line_num in range(len(data)):
+        if line_num % 2:
+            agent_ut.append(data[line_num].strip())
+            final_query += ' [SEP] ' + data[line_num].strip()
+        else:
+            user_ut.append(data[line_num].strip())
+            if line_num > 0:
+                final_query += ' [SEP] ' + data[line_num].strip()
+    
+    # creating training set for question retriever DPR
+    
+    negative_conversation = random.choice(all_data_list)
+    try:
+        assert negative_conversation != data_file
+    except:
+        negative_conversation = random.choice(all_data_list)
+    neg_f = open(negative_conversation)
+    neg_data = neg_f.readlines()
+    neg_linenum = [lineid for lineid in range(len(neg_data)) if lineid % 2]
+    all_query = generate_all_query(user_ut, agent_ut)
+    for idx, item in enumerate(all_query):
+        all_query[idx]['negative_ctxs'] = [neg_data[random.choice(neg_linenum)]]
+        all_query[idx]['hard_negative_ctxs'] = [neg_data[random.choice(neg_linenum)]]
+    question_data.extend(all_query)
+
+
+
+with open('all_questions_train.tsv', 'w', newline='') as csvfile:
     writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_MINIMAL)
     for i in range(len(response_data)):
         writer.writerow(response_data[i])
 
-with open('DPR_answer_product.tsv', 'w', newline='') as csvfile:
+with open('all_answers_train.tsv', 'w', newline='') as csvfile:
     writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_MINIMAL)
     for i in range(len(answer_data)):
         writer.writerow(answer_data[i])
-'''
-with open('DPR_gold','w') as f:
-    for i in range(len(question_id)):
-        f.write(str(question_id[i]))
-        f.write('\n')
-'''
 
-with open('DPR_question_retriever_training','w', newline='') as jsonfile:
+with open('DPR_question_train','w', newline='') as jsonfile:
     json.dump(question_data, jsonfile)
 
-'''
-with open('DPR_answer_test.csv','w', newline='') as csvfile:
-    writer = csv.writer(csvfile, delimiter='\t', quoting=csv.QUOTE_MINIMAL)
-    for i in range(len(question_answer_pair)):
-        writer.writerow(question_answer_pair[i])
-'''
+with open('DPR_answer_train','w', newline='') as jsonfile:
+    json.dump(DPR_answer_training, jsonfile)
 
+'''
+subprocess.check_call(["/usr/bin/python3.6", '/raid/zhenduow/conversationalQA/DPR/generate_dense_embeddings.py',\
+        "--model_file", "/raid/zhenduow/conversationalQA/DPR/checkpoint/retriever/multiset/dpr_biencoder.question",\
+        "--ctx_file", "/raid/zhenduow/conversationalQA/data/all_questions_train.tsv",\
+        "--out_file", "/raid/zhenduow/conversationalQA/data/all_questions_train_embeddings"])
 
 subprocess.check_call(["/usr/bin/python3.6", '/raid/zhenduow/conversationalQA/DPR/generate_dense_embeddings.py',\
-        "--model_file", "/raid/zhenduow/conversationalQA/DPR/checkpoint/retriever/multiset/bert-base-encoder.cp",\
-        "--ctx_file", "/raid/zhenduow/conversationalQA/data/DPR_response_product.tsv",\
-        "--out_file", "/raid/zhenduow/conversationalQA/data/response_embeddings_product"])
-
-subprocess.check_call(["/usr/bin/python3.6", '/raid/zhenduow/conversationalQA/DPR/generate_dense_embeddings.py',\
-        "--model_file", "/raid/zhenduow/conversationalQA/DPR/checkpoint/retriever/multiset/bert-base-encoder.cp",\
-        "--ctx_file", "/raid/zhenduow/conversationalQA/data/DPR_answer_product.tsv",\
-        "--out_file", "/raid/zhenduow/conversationalQA/data/answer_embeddings_product"])
+        "--model_file", "/raid/zhenduow/conversationalQA/DPR/checkpoint/retriever/multiset/dpr_biencoder.answer",\
+        "--ctx_file", "/raid/zhenduow/conversationalQA/data/all_answers_train.tsv",\
+        "--out_file", "/raid/zhenduow/conversationalQA/data/all_answers_train_embeddings"])
+'''

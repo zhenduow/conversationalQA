@@ -12,7 +12,7 @@ class User:
     After the bad question count reaches the patience threshold,
     the user will quit and send back a signal of that.
     '''
-    def __init__(self, dataset, tolerance, patience, cq_reward, cq_penalty):
+    def __init__(self, dataset, cq_reward, cq_penalty, tolerance = 2, patience = 5):
         '''
         :param dataset: (class) The dataset. The default MSDialog-complete dataset format is described in 
                         https://ciir.cs.umass.edu/downloads/msdialog/ 
@@ -23,7 +23,7 @@ class User:
         :param anger: (int) The total count of bad question asked by agent. Initialize this as 0.
         :return: self
         '''
-        self.dataset = dataset.conversations
+        self.dataset = dataset
         self.tolerance = tolerance
         self.patience = patience
         self.anger = 0
@@ -52,7 +52,7 @@ class User:
             try:
                 return self.dataset[conversation_id][question_pos + 1]
             except:
-                logging.info('The question is the last utterance in the conversation.')
+                #logging.info('The question is the last utterance in the conversation.')
                 return -1
     
     def simulate(self, conversation_id, agent):
@@ -126,7 +126,7 @@ class User:
             final_query += ut[:-1] if ut[-1] == '\n' else ut
         return final_query
     
-    def update_state(self, conversation_id, obs, action, top_n_question, top_n_answer, use_top_k, ignore_question_list):
+    def update_state(self, conversation_id, obs, action, top_n_question, top_n_answer, use_top_k):
         '''
         Read the agent action and update the user state, compute reward and return them for save.
         The agent action should be 0 (retrieve an answer) or 1 (ask clarifying question)
@@ -146,9 +146,11 @@ class User:
             #print(rel)
             #reward = ndcg_score(np.asarray([true_rel]),  np.asarray([rel]))
             reward = sum([(n*n)/(id+1) for id,n in enumerate(true_rel)])
-            if reward >= float(1/use_top_k):
+            #if reward >= float(1/use_top_k):
+                #reward = 1
+            if reward > 1:
                 reward = 1
-            return obs_, reward, True, -1
+            return obs_, reward, True, None
         elif action == 1:
             # agent asks clarifying question, find corresponding answer in the dataset and return
             done = False
@@ -159,11 +161,11 @@ class User:
                 if type(response) == int:
                     continue
                 else:
-                    if correct_question_id == -1 and top_n_question[qid] not in set(ignore_question_list):
-                        logging.info("Good CQ.")
+                    if correct_question_id == -1:
+                        #logging.info("Good CQ.")
                         correct_question_id = qid
                         user_response_text = response
-            if 0 <= correct_question_id <= (use_top_k - 1 + len(ignore_question_list)):
+            if 0 <= correct_question_id <= (use_top_k - 1):
                 reward = self.cq_reward
                 obs_ = obs + ' [SEP] ' + top_n_question[correct_question_id] + ' [SEP] ' + user_response_text
             else:
@@ -171,4 +173,4 @@ class User:
                 reward = self.cq_penalty
                 done = True
                 obs_ = obs + ' [SEP] ' + top_n_question[0] + ' [SEP] ' + 'This question is not relevant.'
-            return obs_, reward, done, correct_question_id
+            return obs_, reward, done, top_n_question[correct_question_id]

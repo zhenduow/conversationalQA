@@ -126,7 +126,7 @@ class User:
             final_query += ut[:-1] if ut[-1] == '\n' else ut
         return final_query
     
-    def update_state(self, conversation_id, obs, action, top_n_question, top_n_answer, use_top_k):
+    def update_state(self, conversation_id, context, action, top_n_question, top_n_answer, use_top_k):
         '''
         Read the agent action and update the user state, compute reward and return them for save.
         The agent action should be 0 (retrieve an answer) or 1 (ask clarifying question)
@@ -134,7 +134,7 @@ class User:
         if action == 0:
             # agent answer the question, evaluate the answer
             n = len(top_n_answer)
-            obs_ = obs + ' [SEP] ' + top_n_answer[0]
+            context_ = context + ' [SEP] ' + top_n_answer[0]
             rel = [1]+[0]*(n-1)
             true_rel = [0] * n
             for i in range(n):
@@ -142,15 +142,10 @@ class User:
                     true_rel[i] = - self.respond_to_question(conversation_id, top_n_answer[i])
                 except:
                     print("Error in conversation: " + conversation_id)
-            #print(true_rel)
-            #print(rel)
-            #reward = ndcg_score(np.asarray([true_rel]),  np.asarray([rel]))
             reward = sum([(n*n)/(id+1) for id,n in enumerate(true_rel)])
-            #if reward >= float(1/use_top_k):
-                #reward = 1
             if reward > 1:
                 reward = 1
-            return obs_, reward, True, None
+            return context_, reward, True, None
         elif action == 1:
             # agent asks clarifying question, find corresponding answer in the dataset and return
             done = False
@@ -167,10 +162,10 @@ class User:
                         user_response_text = response
             if 0 <= correct_question_id <= (use_top_k - 1):
                 reward = self.cq_reward
-                obs_ = obs + ' [SEP] ' + top_n_question[correct_question_id] + ' [SEP] ' + user_response_text
+                context_ = context + ' [SEP] ' + top_n_question[correct_question_id] + ' [SEP] ' + user_response_text
             else:
                 # the agent asks a bad question  
                 reward = self.cq_penalty
                 done = True
-                obs_ = obs + ' [SEP] ' + top_n_question[0] + ' [SEP] ' + 'This question is not relevant.'
-            return obs_, reward, done, top_n_question[correct_question_id]
+                context_ = context + ' [SEP] ' + top_n_question[0] + ' [SEP] ' + 'This question is not relevant.'
+            return context_, reward, done, top_n_question[correct_question_id]

@@ -49,4 +49,29 @@ A risk-aware conversational search system consisting of pretrained answer and qu
         --model-file zoo:pretrained_transformers/model_poly/question \
         --ignore-bad-candidates True  --eval-candidates batch
     ```
-    This will download the poly-encoder checkpoints pretrained on reddit and fine-tune it on our preprocessed dataset. The fine-tuning code is based on [ParlAI poly-encoder](https://github.com/facebookresearch/ParlAI/tree/master/projects/polyencoder/), but we modify several scripts for our needs. It is not recommended to download the original ParlAI code and replace the ParlAI folder in this program.
+    This will download the poly-encoder checkpoints pretrained on reddit and fine-tune it on our preprocessed dataset. The fine-tuned model is save in ParlAI/data/models/pretrained_transformers/model_poly/.
+    For bi-encoder fine-tuning, use the following command:
+    ```
+    $ cd ParlAI
+    $ python3.6 -u examples/train_model.py \
+        --init-model zoo:pretrained_transformers/bi_model_huge_reddit/model \
+        -t fromfile:parlaiformat --fromfile_datapath ../data/MSDialog-parlai-question \
+        --model transformer/biencoder --batchsize 4 --eval-batchsize 100 \
+        --warmup_updates 100 --lr-scheduler-patience 0 \
+        --lr-scheduler-decay 0.4 -lr 5e-05 --data-parallel True \
+        --history-size 20 --label-truncate 72 --text-truncate 360 \
+        --num-epochs 10.0 --max_train_time 200000 -veps 0.5 -vme 8000 \
+        --validation-metric accuracy --validation-metric-mode max \
+        --save-after-valid True --log_every_n_secs 20 --candidates batch \
+        --dict-tokenizer bpe --dict-lower True --optimizer adamax \
+        --output-scaling 0.06 \
+        --variant xlm --reduction-type mean --share-encoders False \
+        --learn-positional-embeddings True --n-layers 12 --n-heads 12 \
+        --ffn-size 3072 --attention-dropout 0.1 --relu-dropout 0.0 --dropout 0.1 \
+        --n-positions 1024 --embedding-size 768 --activation gelu \
+        --embeddings-scale False --n-segments 2 --learn-embeddings True \
+        --share-word-embeddings False --dict-endtoken __start__ --fp16 True \
+        --model-file zoo:pretrained_transformers/model_bi/question\
+        --ignore-bad-candidates True  --eval-candidates batch
+    ```
+    The fine-tuning code is based on [ParlAI poly-encoder](https://github.com/facebookresearch/ParlAI/tree/master/projects/polyencoder/), but we modify several scripts for our needs. We do not recommended downloading the original ParlAI code and replace the ParlAI folder in this program. The original training of the encoders are done on 8 x GPU 32GB. We decrease the batch size and is able to run it on 4 x GPU 11GB (GeForce RTX 2080Ti).

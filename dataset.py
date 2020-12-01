@@ -5,14 +5,15 @@ import glob
 
 class ConversationDataset():
     '''
-    The conversation database class. The dataset should consist of a dictionary with the conversation identifiers as keys,
-    and lists of utterances as values.
+    The conversation database class. 
     '''
-    def __init__(self, path_to_dataset, batch_size):
+    def __init__(self, path_to_dataset, batch_size, max_size):
         self.batches = []
         self.max_len = 512
+        print("Reading data from", path_to_dataset, "batch size", batch_size)
         all_data_list = glob.glob(path_to_dataset + '*')
         all_data_list.sort()
+        all_data_list = all_data_list[:max_size] # max size
         files_in_batch = 0
         for data_file in all_data_list:
             f = open(data_file)

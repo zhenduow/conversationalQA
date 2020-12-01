@@ -1,4 +1,4 @@
-# conversational search
+# Controlling the Risk of Conversational Search via Reinforcement Learning
 A risk-aware conversational search system consisting of pretrained answer and question rerankers and a decision maker trained by reinforcement learning.
 
 

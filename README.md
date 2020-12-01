@@ -49,3 +49,4 @@ A risk-aware conversational search system consisting of pretrained answer and qu
         --model-file zoo:pretrained_transformers/model_poly/question \
         --ignore-bad-candidates True  --eval-candidates batch
     ```
+    This will download the poly-encoder checkpoints pretrained on reddit and fine-tune it on our preprocessed dataset. The fine-tuning code is based on [ParlAI poly-encoder](https://github.com/facebookresearch/ParlAI/tree/master/projects/polyencoder/), but we modify several scripts for our needs.

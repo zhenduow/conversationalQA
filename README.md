@@ -3,7 +3,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
 
 
 * How to use
-  * Preprocess data. Here we use MSDialog dataset as example. You can set dataset_name to be 'UDC' or 'Opendialkg' for Ubuntu Dialog Corpus or Opendialkg currently.
+  * Preprocess data. Here we use [MSDialog dataset](https://ciir.cs.umass.edu/downloads/msdialog/) as example. You can set dataset_name to be 'UDC' or 'Opendialkg' for Ubuntu Dialog Corpus or Opendialkg currently.
     ```
     cd data
     python3 data_processing.py --dataset_name MSDialog

@@ -16,11 +16,11 @@ class LinearDeepQNetwork(nn.Module):
     def __init__(self, lr, lr_decay, weight_decay, n_actions, input_dims, hidden_size = 16):
         super(LinearDeepQNetwork, self).__init__()
         self.fc1 = nn.Linear(input_dims, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, 2)
+        self.fc2 = nn.Linear(hidden_size, n_actions)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, weight_decay = weight_decay)
         self.loss = nn.MSELoss()
-        self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
+        self.device = T.device('cuda' if T.cuda.is_available() else 'cpu')
         self.to(self.device)
 
     def forward(self, state):
@@ -36,11 +36,11 @@ class LinearDeepNetwork(nn.Module):
     def __init__(self, lr, lr_decay, weight_decay, n_actions, input_dims, hidden_size = 16):
         super(LinearDeepNetwork, self).__init__()
         self.fc1 = nn.Linear(input_dims, hidden_size)
-        self.fc2 = nn.Linear(hidden_size, 2)
+        self.fc2 = nn.Linear(hidden_size, n_actions)
 
         self.optimizer = optim.Adam(self.parameters(), lr=lr, weight_decay = weight_decay)
         self.loss = nn.MSELoss()
-        self.device = T.device('cuda:0' if T.cuda.is_available() else 'cpu')
+        self.device = T.device('cuda' if T.cuda.is_available() else 'cpu')
         self.to(self.device)
 
     def forward(self, state):
@@ -68,13 +68,13 @@ class Agent():
         self.top_k = top_k
         self.data_augment = data_augment
         self.action_space = [i for i in range(self.n_actions)]
-        self.tokenizer = AutoTokenizer.from_pretrained('xlnet-base-cased')
-        self.embedding_model = AutoModel.from_pretrained('xlnet-base-cased')
         self.experiences = []
         self.experiences_replay_times = 3
         self.loss_history = []
 
         self.Q = LinearDeepQNetwork(self.lr, self.lr_decay, self.weight_decay, self.n_actions, self.input_dims)
+        self.device = T.device("cuda")
+        self.Q.to(self.device)
 
     def choose_action(self, query_embedding, context_embedding, questions_embeddings, answers_embeddings, question_scores, answer_scores):
         encoded_q = questions_embeddings[0]
@@ -88,7 +88,7 @@ class Agent():
         encoded_state = T.cat((encoded_state, answer_scores[:1]), dim=0)
     
         if np.random.random() > self.epsilon:
-            state = T.tensor(encoded_state, dtype=T.float).to(self.Q.device)
+            state = T.tensor(encoded_state, dtype=T.float).to(self.device)
             actions = self.Q.forward(state)
             action = T.argmax(actions).item()
         else:
@@ -141,17 +141,16 @@ class Agent():
                 encoded_state_ = T.cat((encoded_state_, answer_scores_[:1]), dim=0)
             
             self.Q.optimizer.zero_grad()
-            states = T.tensor(encoded_state, dtype=T.float).to(self.Q.device)
-            a_rewards = T.tensor(a_reward).to(self.Q.device)
-            q_rewards = T.tensor(q_reward).to(self.Q.device)
-            states_ = T.tensor(encoded_state_, dtype=T.float).to(self.Q.device) if encoded_state_ is not None else None
+            states = T.tensor(encoded_state, dtype=T.float).to(self.device)
+            a_rewards = T.tensor(a_reward).to(self.device)
+            q_rewards = T.tensor(q_reward).to(self.device)
+            states_ = T.tensor(encoded_state_, dtype=T.float).to(self.device) if encoded_state_ is not None else None
 
             pred = self.Q.forward(states)
-            q_next = self.Q.forward(states_).max() if encoded_state_ is not None else T.tensor(0).to(self.Q.device)
-            q_target = T.tensor([a_rewards, q_rewards + self.gamma*q_next]).to(self.Q.device) if encoded_state_ is not None else T.tensor([a_rewards, q_rewards]).to(self.Q.device)
+            q_next = self.Q.forward(states_).max() if encoded_state_ is not None else T.tensor(0).to(self.device)
+            q_target = T.tensor([a_rewards, q_rewards + self.gamma*q_next]).to(self.device) if encoded_state_ is not None else T.tensor([a_rewards, q_rewards]).to(self.device)
 
-
-            loss = self.Q.loss(q_target, pred).to(self.Q.device)
+            loss = self.Q.loss(q_target, pred).to(self.device)
             # l1 penalty
             l1 = 0
             for p in self.Q.parameters():
@@ -175,17 +174,16 @@ class BaseAgent():
         self.input_dims = input_dims
         self.n_actions = n_actions
         self.weight_decay = weight_decay 
-        
-        self.tokenizer = AutoTokenizer.from_pretrained('xlnet-base-cased')
-        self.embedding_model = AutoModel.from_pretrained('xlnet-base-cased')
         self.loss_history = []
 
         self.Q = LinearDeepNetwork(self.lr, self.lr_decay, self.weight_decay, self.n_actions, self.input_dims)
+        self.device = T.device("cuda")
+        self.Q.to(self.device)
 
     def choose_action(self, query_embedding, context_embedding):
         
         encoded_state = T.cat((query_embedding, context_embedding), dim=0)
-        state = T.tensor(encoded_state, dtype=T.float).to(self.Q.device)
+        state = T.tensor(encoded_state, dtype=T.float).to(self.device)
         actions = self.Q.forward(state)
         action = T.argmax(actions).item()
         
@@ -196,11 +194,11 @@ class BaseAgent():
         encoded_state = T.cat((query_embedding, context_embedding), dim=0)
        
         self.Q.optimizer.zero_grad()
-        states = T.tensor(encoded_state, dtype=T.float).to(self.Q.device)
+        states = T.tensor(encoded_state, dtype=T.float).to(self.device)
         
         pred = self.Q.forward(states)
-        q_target = T.tensor([1, 0]).to(self.Q.device) if true_label == 0 else T.tensor([0, 1]).to(self.Q.device)
-        loss = self.Q.loss(q_target, pred).to(self.Q.device)
+        q_target = T.tensor([1, 0]).to(self.device) if true_label == 0 else T.tensor([0, 1]).to(self.device)
+        loss = self.Q.loss(q_target, pred).to(self.device)
             
         # l1 penalty
         l1 = 0
@@ -210,7 +208,6 @@ class BaseAgent():
         loss = loss + self.weight_decay * l1
             
         self.loss_history.append(loss.item())
-        print('target', q_target, 'pred', pred, 'loss', loss.item())
 
         loss.backward()
         self.Q.optimizer.step()     
@@ -240,6 +237,8 @@ class ScoreAgent():
         self.loss_history = []
 
         self.Q = LinearDeepQNetwork(self.lr, self.lr_decay, self.weight_decay, self.n_actions, self.input_dims)
+        self.device = T.device("cuda")
+        self.Q.to(self.device)
 
     def choose_action(self, question_scores, answer_scores):
         question_scores = T.tensor(question_scores)
@@ -248,7 +247,7 @@ class ScoreAgent():
 
         if np.random.random() > self.epsilon:
             'if the random number is greater than exploration threshold, choose the action maximizing Q'
-            state = T.tensor(encoded_state, dtype=T.float).to(self.Q.device)
+            state = T.tensor(encoded_state, dtype=T.float).to(self.device)
             actions = self.Q.forward(state)
             #print(actions)
             action = T.argmax(actions).item()
@@ -287,16 +286,16 @@ class ScoreAgent():
                 encoded_state_ = None
 
             self.Q.optimizer.zero_grad()
-            states = T.tensor(encoded_state, dtype=T.float).to(self.Q.device)
-            a_rewards = T.tensor(a_reward).to(self.Q.device)
-            q_rewards = T.tensor(q_reward).to(self.Q.device)
-            states_ = T.tensor(encoded_state_, dtype=T.float).to(self.Q.device) if encoded_state_ is not None else None
+            states = T.tensor(encoded_state, dtype=T.float).to(self.device)
+            a_rewards = T.tensor(a_reward).to(self.device)
+            q_rewards = T.tensor(q_reward).to(self.device)
+            states_ = T.tensor(encoded_state_, dtype=T.float).to(self.device) if encoded_state_ is not None else None
 
             pred = self.Q.forward(states)
-            q_next = self.Q.forward(states_).max() if encoded_state_ is not None else T.tensor(0).to(self.Q.device)
-            q_target = T.tensor([a_rewards, q_rewards + self.gamma*q_next]).to(self.Q.device) if encoded_state_ is not None else T.tensor([a_rewards, q_rewards]).to(self.Q.device)
+            q_next = self.Q.forward(states_).max() if encoded_state_ is not None else T.tensor(0).to(self.device)
+            q_target = T.tensor([a_rewards, q_rewards + self.gamma*q_next]).to(self.device) if encoded_state_ is not None else T.tensor([a_rewards, q_rewards]).to(self.device)
 
-            loss = self.Q.loss(q_target, pred).to(self.Q.device) 
+            loss = self.Q.loss(q_target, pred).to(self.device) 
             # l1 penalty
             l1 = 0
             for p in self.Q.parameters():
@@ -328,13 +327,13 @@ class TextAgent():
         self.top_k = top_k
         self.data_augment = data_augment
         self.action_space = [i for i in range(self.n_actions)]
-        self.tokenizer = AutoTokenizer.from_pretrained('xlnet-base-cased')
-        self.embedding_model = AutoModel.from_pretrained('xlnet-base-cased')
         self.experiences = []
         self.experiences_replay_times = 3
         self.loss_history = []
 
         self.Q = LinearDeepQNetwork(self.lr, self.lr_decay, self.weight_decay, self.n_actions, self.input_dims)
+        self.device = T.device("cuda")
+        self.Q.to(self.device)
 
     def choose_action(self, query_embedding, context_embedding, questions_embeddings, answers_embeddings):
         # Encode text
@@ -348,7 +347,7 @@ class TextAgent():
         
         if np.random.random() > self.epsilon:
             'if the random number is greater than exploration threshold, choose the action maximizing Q'
-            state = T.tensor(encoded_state, dtype=T.float).to(self.Q.device)
+            state = T.tensor(encoded_state, dtype=T.float).to(self.device)
             actions = self.Q.forward(state)
             #print(actions)
             action = T.argmax(actions).item()
@@ -400,16 +399,16 @@ class TextAgent():
                 encoded_state_ = T.cat((encoded_state_, answers_embeddings_[0]), dim=0)
             
             self.Q.optimizer.zero_grad()
-            states = T.tensor(encoded_state, dtype=T.float).to(self.Q.device)
-            a_rewards = T.tensor(a_reward).to(self.Q.device)
-            q_rewards = T.tensor(q_reward).to(self.Q.device)
-            states_ = T.tensor(encoded_state_, dtype=T.float).to(self.Q.device) if encoded_state_ is not None else None
+            states = T.tensor(encoded_state, dtype=T.float).to(self.device)
+            a_rewards = T.tensor(a_reward).to(self.device)
+            q_rewards = T.tensor(q_reward).to(self.device)
+            states_ = T.tensor(encoded_state_, dtype=T.float).to(self.device) if encoded_state_ is not None else None
 
             pred = self.Q.forward(states)
-            q_next = self.Q.forward(states_).max() if encoded_state_ is not None else T.tensor(0).to(self.Q.device)
-            q_target = T.tensor([a_rewards, q_rewards + self.gamma*q_next]).to(self.Q.device) if encoded_state_ is not None else T.tensor([a_rewards, q_rewards]).to(self.Q.device)
+            q_next = self.Q.forward(states_).max() if encoded_state_ is not None else T.tensor(0).to(self.device)
+            q_target = T.tensor([a_rewards, q_rewards + self.gamma*q_next]).to(self.device) if encoded_state_ is not None else T.tensor([a_rewards, q_rewards]).to(self.device)
 
-            loss = self.Q.loss(q_target, pred).to(self.Q.device)
+            loss = self.Q.loss(q_target, pred).to(self.device)
             # l1 penalty
             l1 = 0
             for p in self.Q.parameters():

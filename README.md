@@ -18,7 +18,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
         --model transformer/polyencoder --batchsize 4 --eval-batchsize 100 \
         --warmup_updates 100 --lr-scheduler-patience 0 --lr-scheduler-decay 0.4 \
         -lr 5e-05 --data-parallel True --history-size 20 --label-truncate 72 \
-        --text-truncate 360 --num-epochs 16.0 --max_train_time 200000 -veps 0.5 \
+        --text-truncate 360 --num-epochs 12.0 --max_train_time 200000 -veps 0.5 \
         -vme 8000 --validation-metric accuracy --validation-metric-mode max \
         --save-after-valid True --log_every_n_secs 20 --candidates batch --fp16 True \
         --dict-tokenizer bpe --dict-lower True --optimizer adamax --output-scaling 0.06 \
@@ -36,7 +36,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
         --model transformer/polyencoder --batchsize 4 --eval-batchsize 100 \
         --warmup_updates 100 --lr-scheduler-patience 0 --lr-scheduler-decay 0.4 \
         -lr 5e-05 --data-parallel True --history-size 20 --label-truncate 72 \
-        --text-truncate 360 --num-epochs 16.0 --max_train_time 200000 -veps 0.5 \
+        --text-truncate 360 --num-epochs 12.0 --max_train_time 200000 -veps 0.5 \
         -vme 8000 --validation-metric accuracy --validation-metric-mode max \
         --save-after-valid True --log_every_n_secs 20 --candidates batch --fp16 True \
         --dict-tokenizer bpe --dict-lower True --optimizer adamax --output-scaling 0.06 \
@@ -60,7 +60,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
         --warmup_updates 100 --lr-scheduler-patience 0 \
         --lr-scheduler-decay 0.4 -lr 5e-05 --data-parallel True \
         --history-size 20 --label-truncate 72 --text-truncate 360 \
-        --num-epochs 10.0 --max_train_time 200000 -veps 0.5 -vme 8000 \
+        --num-epochs 12.0 --max_train_time 200000 -veps 0.5 -vme 8000 \
         --validation-metric accuracy --validation-metric-mode max \
         --save-after-valid True --log_every_n_secs 20 --candidates batch \
         --dict-tokenizer bpe --dict-lower True --optimizer adamax \

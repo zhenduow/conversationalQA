@@ -12,7 +12,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
 1. Fine-tune pretrained reranker checkpoints on dataset (MSDialog as example)
     ```
     $ cd ParlAI
-    $ python3.6 -u examples/train_model.py \
+    $ python3 -u examples/train_model.py \
         --init-model zoo:pretrained_transformers/poly_model_huge_reddit/model \
         -t fromfile:parlaiformat --fromfile_datapath ../data/MSDialog-parlai-answer \ # answer/question
         --model transformer/polyencoder --batchsize 4 --eval-batchsize 100 \
@@ -35,7 +35,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
     For bi-encoder fine-tuning, use the following command:
     ```
     $ cd ParlAI
-    $ python3.6 -u examples/train_model.py \
+    $ python3 -u examples/train_model.py \
         --init-model zoo:pretrained_transformers/bi_model_huge_reddit/model \
         -t fromfile:parlaiformat --fromfile_datapath ../data/MSDialog-parlai-question \ # answer/question
         --model transformer/biencoder --batchsize 4 --eval-batchsize 100 \
@@ -57,3 +57,8 @@ A risk-aware conversational search system consisting of pretrained answer and qu
         --ignore-bad-candidates True  --eval-candidates batch
     ```
     The fine-tuning code is based on [ParlAI poly-encoder](https://github.com/facebookresearch/ParlAI/tree/master/projects/polyencoder/), but we modify several scripts for our needs. We do not recommended downloading the original ParlAI code and replace the ParlAI folder in this program. The original training of the encoders are done on 8 x GPU 32GB. We decrease the batch size and is able to run it on 4 x GPU 11GB (GeForce RTX 2080Ti).
+1. Run the main experiments. To run the experiments, use the following code:
+    ```
+    $ python3  run_sampling.py --dataset_name MSDialog --reranker_name Poly --topn 1 --cv 0 
+    ```
+    `--dataset_name` can be 'MSDialog', 'UDC', or 'Opendialkg' currently. `--reranker_name` can be 'Poly' or 'Bi' currently. `--topn` means the top n reranked candidates are considered correct, i.e. `--topn ` computes recall@1. The MSDialog dataset is too small, so it's recommended to run it using cross validation. When the dataset size is big enough or there is no need to run cross validation, simply use `--cv -1` to turn off cross validation. 

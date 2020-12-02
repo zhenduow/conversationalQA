@@ -27,10 +27,6 @@ batch_size = 100
 max_round = 5
 max_train_size = 10000
 max_test_size = int(0.25*max_train_size)
-use_top_k = 1 # 1,2,3
-cv_split = 0 # '', 0,1,2,3,4
-ranker_name = 'Bi' # Poly, Bert, KNRM, Bi
-exp_name = 'MSDialog' # MSDialog, UDC, Opendialkg
 
 def limit_memory(maxsize): 
     soft, hard = resource.getrlimit(resource.RLIMIT_AS) 
@@ -89,22 +85,22 @@ def generate_batch_answer_candidates(batch, conversation_id, total_candidates):
     return positives + negatives
 
 
-def main():
+def main(args):
     logging.getLogger().setLevel(logging.INFO)
     limit_memory(1*1e11)
 
     random.seed(2020)
-    train_dataset = ConversationDataset('data/' + exp_name + '-Complete/train' + str(cv_split) + '/', batch_size, max_train_size)
-    test_dataset = ConversationDataset('data/' + exp_name + '-Complete/test' + str(cv_split) + '/', batch_size, max_test_size)
+    train_dataset = ConversationDataset('data/' + args.dataset_name + '-Complete/train' + str(args.cv) + '/', batch_size, max_train_size)
+    test_dataset = ConversationDataset('data/' + args.dataset_name + '-Complete/test' + str(args.cv) + '/', batch_size, max_test_size)
     train_size = sum([len(b['conversations'].keys()) for b in train_dataset.batches]) 
     test_size = sum([len(b['conversations'].keys()) for b in test_dataset.batches]) 
-    agent = Agent(lr=1e-4, input_dims = (3 + use_top_k) * observation_dim + 1 + use_top_k, top_k = use_top_k, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
-    score_agent = ScoreAgent(lr = 1e-4, input_dims = 1 + use_top_k, top_k = use_top_k, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.0)
-    text_agent = TextAgent(lr = 1e-4, input_dims = (3 + use_top_k) * observation_dim, top_k = use_top_k, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
+    agent = Agent(lr=1e-4, input_dims = (3 + args.topn) * observation_dim + 1 + args.topn, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
+    score_agent = ScoreAgent(lr = 1e-4, input_dims = 1 + args.topn, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.0)
+    text_agent = TextAgent(lr = 1e-4, input_dims = (3 + args.topn) * observation_dim, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
     base_agent = BaseAgent(lr=1e-4, input_dims = 2 * observation_dim, n_actions = 2, weight_decay = 0.01)
     
     # create rerankers
-    if ranker_name == 'Poly':
+    if args.reranker_name == 'Poly':
         question_reranker = Interactive.main(model = 'transformer/polyencoder', \
                             model_file = 'zoo:pretrained_transformers/model_poly/question',  \
                             encode_candidate_vecs = False,  eval_candidates = 'inline', interactive_candidates = 'inline',
@@ -113,7 +109,7 @@ def main():
                             model_file = 'zoo:pretrained_transformers/model_poly/answer',  \
                             encode_candidate_vecs = False,  eval_candidates = 'inline', interactive_candidates = 'inline',
                             return_cand_scores = True)
-    elif ranker_name == 'Bi':
+    elif args.reranker_name == 'Bi':
         bi_question_reranker = Interactive.main(model = 'transformer/biencoder', \
                             model_file = 'zoo:pretrained_transformers/model_bi/question',  \
                             encode_candidate_vecs = False,  eval_candidates = 'inline', interactive_candidates = 'inline',
@@ -137,8 +133,8 @@ def main():
         train_worse, train_q0_worse, train_q1_worse, train_q2_worse, train_oracle_worse, train_base_worse, train_score_worse, train_text_worse = [],[],[],[],[],[],[],[]
         #train_correct, train_q0_correct, train_q1_correct, train_q2_correct, train_oracle_correct, train_base_correct, train_score_correct,train_text_correct = [],[],[],[],[],[],[],[]
         for batch_serial, batch in enumerate(train_dataset.batches):
-            if os.path.exists(exp_name + '_experiments/embedding_cache/' + ranker_name + '/' + str(cv_split) + '/train/memory.batchsave' + str(batch_serial)):
-                memory = T.load(exp_name + '_experiments/embedding_cache/' + ranker_name + '/' + str(cv_split) + '/train/memory.batchsave' + str(batch_serial))
+            if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial)):
+                memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
             else:
                 memory = {}
             train_ids = list(batch['conversations'].keys())
@@ -164,10 +160,10 @@ def main():
                             question_candidates = generate_batch_question_candidates(batch, train_id, ignore_questions, batch_size)
                             answer_candidates = generate_batch_answer_candidates(batch, train_id, batch_size)
                             # get reranker results   
-                            if ranker_name == 'Poly': 
+                            if args.reranker_name == 'Poly': 
                                 questions, questions_scores = rerank(question_reranker, query, context, question_candidates)
                                 answers, answers_scores = rerank(answer_reranker, query, context, answer_candidates)
-                            elif ranker_name == 'Bi': 
+                            elif args.reranker_name == 'Bi': 
                                 questions, questions_scores = rerank(bi_question_reranker, query, context, question_candidates)
                                 answers, answers_scores = rerank(bi_answer_reranker, query, context, answer_candidates)
 
@@ -178,10 +174,10 @@ def main():
                         question_candidates = generate_batch_question_candidates(batch, train_id, ignore_questions, batch_size)
                         answer_candidates = generate_batch_answer_candidates(batch, train_id, batch_size)
                         # get reranker results   
-                        if ranker_name == 'Poly': 
+                        if args.reranker_name == 'Poly': 
                             questions, questions_scores = rerank(question_reranker, query, context, question_candidates)
                             answers, answers_scores = rerank(answer_reranker, query, context, answer_candidates)
-                        elif ranker_name == 'Bi': 
+                        elif args.reranker_name == 'Bi': 
                             questions, questions_scores = rerank(bi_question_reranker, query, context, question_candidates)
                             answers, answers_scores = rerank(bi_answer_reranker, query, context, answer_candidates)
                         
@@ -194,8 +190,8 @@ def main():
                     text_action = text_agent.choose_action(query_embedding, context_embedding, questions_embeddings, answers_embeddings)
 
                     evaluation_tic = time.perf_counter()
-                    context_, question_reward, q_done, good_question = user.update_state(train_id, context, 1, questions, answers, use_top_k = use_top_k)
-                    _, answer_reward, _, _ = user.update_state(train_id, context, 0, questions, answers, use_top_k = use_top_k)
+                    context_, question_reward, q_done, good_question = user.update_state(train_id, context, 1, questions, answers, args.topn = args.topn)
+                    _, answer_reward, _, _ = user.update_state(train_id, context, 0, questions, answers, args.topn = args.topn)
                     action_reward = [answer_reward, question_reward][action]
                     evaluation_toc = time.perf_counter()
                     print('action', action, 'base_action', base_action, 'score_action', score_action,'text_action', text_action, 'answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
@@ -211,10 +207,10 @@ def main():
                             answer_candidates = generate_batch_answer_candidates(batch, train_id, batch_size)
 
                             # get reranker results
-                            if ranker_name == 'Poly': 
+                            if args.reranker_name == 'Poly': 
                                 questions_, questions_scores_ = rerank(question_reranker, query, context_, question_candidates)
                                 answers_, answers_scores_ = rerank(answer_reranker, query, context_, answer_candidates)
-                            elif ranker_name == 'Bi': 
+                            elif args.reranker_name == 'Bi': 
                                 questions_, questions_scores_ = rerank(bi_question_reranker, query, context_, question_candidates)
                                 answers_, answers_scores_ = rerank(bi_answer_reranker, query, context_, answer_candidates)
                             
@@ -244,7 +240,7 @@ def main():
                         if action == 0 and answer_reward == 1.0:
                             #train_correct.append(train_id) 
                             pass
-                        train_worse.append(1 if (action == 0 and answer_reward < float(1/use_top_k) and question_reward == cq_reward) \
+                        train_worse.append(1 if (action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
 
                     if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)) and not base_stop:
@@ -253,7 +249,7 @@ def main():
                         if base_action == 0 and answer_reward == 1.0:
                             #train_base_correct.append(train_id)
                             pass
-                        train_base_worse.append(1 if (base_action == 0 and answer_reward < float(1/use_top_k) and question_reward == cq_reward) \
+                        train_base_worse.append(1 if (base_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (base_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
                     
                     if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)) and not score_stop:
@@ -262,7 +258,7 @@ def main():
                         if score_action == 0 and answer_reward == 1.0:
                             pass
                             #train_score_correct.append(train_id)
-                        train_score_worse.append(1 if (score_action == 0 and answer_reward < float(1/use_top_k) and question_reward == cq_reward) \
+                        train_score_worse.append(1 if (score_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (score_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
                     
                     if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)) and not text_stop:
@@ -271,12 +267,12 @@ def main():
                         if text_action == 0 and answer_reward == 1.0:
                             pass
                             #train_text_correct.append(train_id)
-                        train_text_worse.append(1 if (text_action == 0 and answer_reward < float(1/use_top_k) and question_reward == cq_reward) \
+                        train_text_worse.append(1 if (text_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (text_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
 
                     if n_round == 0:
                         train_q0_scores.append(answer_reward)
-                        train_q0_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                        train_q0_worse.append(1 if answer_reward < float(1/args.topn) and question_reward == cq_reward else 0)
                         if answer_reward == 1:
                             pass
                             #train_q0_correct.append(train_id)
@@ -287,7 +283,7 @@ def main():
                             train_q2_worse.append(1)
                     elif n_round == 1:
                         train_q1_scores.append(answer_reward)
-                        train_q1_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                        train_q1_worse.append(1 if answer_reward < float(1/args.topn) and question_reward == cq_reward else 0)
                         if answer_reward == 1:
                             pass
                             #train_q1_correct.append(train_id)
@@ -296,7 +292,7 @@ def main():
                             train_q2_worse.append(1)
                     elif n_round == 2:
                         train_q2_scores.append(answer_reward)
-                        train_q2_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                        train_q2_worse.append(1 if answer_reward < float(1/args.topn) and question_reward == cq_reward else 0)
                         if answer_reward == 1:
                             pass
                             #train_q2_correct.append(train_id)
@@ -307,8 +303,8 @@ def main():
                     print("total:", total_toc - total_tic, "evaluation", evaluation_toc - evaluation_tic)
             
             # save memory per batch
-            T.save(memory, exp_name + '_experiments/embedding_cache/' + ranker_name + '/' + str(cv_split) + '/train/memory.batchsave' + str(batch_serial))
-            #T.save(memory, exp_name + '_experiments/embedding_cache/' + ranker_name  + str(cv_split) + '/train/memory.batchsave' + str(batch_serial))
+            T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
+            #T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name  + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
 
         for oi in range(len(train_scores)):
             train_oracle_scores.append(max(train_q0_scores[oi], train_q1_scores[oi], train_q2_scores[oi]))
@@ -352,8 +348,8 @@ def main():
         agent.epsilon = 0
         
         for batch_serial, batch in enumerate(test_dataset.batches):
-            if os.path.exists(exp_name + '_experiments/embedding_cache/' + ranker_name + '/' + str(cv_split) + '/test/memory.batchsave' + str(batch_serial)):
-                memory = T.load(exp_name + '_experiments/embedding_cache/' + ranker_name + '/' + str(cv_split) + '/test/memory.batchsave' + str(batch_serial))
+            if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial)):
+                memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
             else:
                 memory = {}
             test_ids = list(batch['conversations'].keys())
@@ -376,10 +372,10 @@ def main():
                             question_candidates = generate_batch_question_candidates(batch, test_id, ignore_questions, batch_size)
                             answer_candidates = generate_batch_answer_candidates(batch, test_id, batch_size)
                             # get reranker results   
-                            if ranker_name == 'Poly': 
+                            if args.reranker_name == 'Poly': 
                                 questions, questions_scores = rerank(question_reranker, query, context, question_candidates)
                                 answers, answers_scores = rerank(answer_reranker, query, context, answer_candidates)
-                            elif ranker_name == 'Bi': 
+                            elif args.reranker_name == 'Bi': 
                                 questions, questions_scores = rerank(bi_question_reranker, query, context, question_candidates)
                                 answers, answers_scores = rerank(bi_answer_reranker, query, context, answer_candidates)
 
@@ -391,10 +387,10 @@ def main():
                         answer_candidates = generate_batch_answer_candidates(batch, test_id, batch_size)
 
                         # get reranker results
-                        if ranker_name == 'Poly': 
+                        if args.reranker_name == 'Poly': 
                             questions, questions_scores = rerank(question_reranker, query, context, question_candidates)
                             answers, answers_scores = rerank(answer_reranker, query, context, answer_candidates)
-                        elif ranker_name == 'Bi':
+                        elif args.reranker_name == 'Bi':
                             questions, questions_scores = rerank(bi_question_reranker, query, context, question_candidates)
                             answers, answers_scores = rerank(bi_answer_reranker, query, context, answer_candidates)
                     
@@ -406,8 +402,8 @@ def main():
                     score_action = score_agent.choose_action(questions_scores, answers_scores)
                     text_action = text_agent.choose_action(query_embedding, context_embedding, questions_embeddings, answers_embeddings)
                     
-                    context_, question_reward, q_done, good_question = user.update_state(test_id, context, 1, questions, answers, use_top_k = use_top_k)
-                    _, answer_reward, _, _ = user.update_state(test_id, context, 0, questions, answers, use_top_k = use_top_k)
+                    context_, question_reward, q_done, good_question = user.update_state(test_id, context, 1, questions, answers, args.topn = args.topn)
+                    _, answer_reward, _, _ = user.update_state(test_id, context, 0, questions, answers, args.topn = args.topn)
                     action_reward = [answer_reward, question_reward][action]
                     print('action', action, 'base_action', base_action, 'score_action', score_action,'text_action', text_action, 'answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
 
@@ -421,10 +417,10 @@ def main():
                             question_candidates = generate_batch_question_candidates(batch, test_id, ignore_questions, batch_size)
                             answer_candidates = generate_batch_answer_candidates(batch, test_id, batch_size)
                             # get reranker results
-                            if ranker_name == 'Poly': 
+                            if args.reranker_name == 'Poly': 
                                 questions_, questions_scores_ = rerank(question_reranker, query, context_, question_candidates)
                                 answers_, answers_scores_ = rerank(answer_reranker, query, context_, answer_candidates)
-                            elif ranker_name == 'Bi': 
+                            elif args.reranker_name == 'Bi': 
                                 questions_, questions_scores_ = rerank(bi_question_reranker, query, context_, question_candidates)
                                 answers_, answers_scores_ = rerank(bi_answer_reranker, query, context_, answer_candidates)
                             
@@ -438,7 +434,7 @@ def main():
                         if action == 0 and answer_reward == 1.0:
                             pass
                             #test_correct.append(test_id)
-                        test_worse.append(1 if (action == 0 and answer_reward < float(1/use_top_k) and question_reward == cq_reward) \
+                        test_worse.append(1 if (action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
 
                     if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)) and not base_stop:
@@ -447,7 +443,7 @@ def main():
                         if base_action == 0 and answer_reward == 1.0:
                             pass
                             #test_base_correct.append(test_id)
-                        test_base_worse.append(1 if (base_action == 0 and answer_reward < float(1/use_top_k) and question_reward == cq_reward) \
+                        test_base_worse.append(1 if (base_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (base_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
 
                     if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)) and not score_stop:
@@ -456,7 +452,7 @@ def main():
                         if score_action == 0 and answer_reward == 1.0:
                             pass
                             #test_score_correct.append(test_id)
-                        test_score_worse.append(1 if (score_action == 0 and answer_reward < float(1/use_top_k) and question_reward == cq_reward) \
+                        test_score_worse.append(1 if (score_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (score_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
                     
                     if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)) and not text_stop:
@@ -465,12 +461,12 @@ def main():
                         if text_action == 0 and answer_reward == 1.0:
                             pass
                             #test_text_correct.append(test_id)
-                        test_text_worse.append(1 if (text_action == 0 and answer_reward < float(1/use_top_k) and question_reward == cq_reward) \
+                        test_text_worse.append(1 if (text_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (text_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
 
                     if n_round == 0:
                         test_q0_scores.append(answer_reward)
-                        test_q0_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                        test_q0_worse.append(1 if answer_reward < float(1/args.topn) and question_reward == cq_reward else 0)
                         if answer_reward == 1:
                             pass
                             #test_q0_correct.append(test_id)
@@ -481,7 +477,7 @@ def main():
                             test_q2_worse.append(1)
                     elif n_round == 1:
                         test_q1_scores.append(answer_reward)
-                        test_q1_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                        test_q1_worse.append(1 if answer_reward < float(1/args.topn) and question_reward == cq_reward else 0)
                         if answer_reward == 1:
                             pass
                             #test_q1_correct.append(test_id)
@@ -490,7 +486,7 @@ def main():
                             test_q2_worse.append(1)
                     elif n_round == 2:
                         test_q2_scores.append(answer_reward)
-                        test_q2_worse.append(1 if answer_reward < float(1/use_top_k) and question_reward == cq_reward else 0)
+                        test_q2_worse.append(1 if answer_reward < float(1/args.topn) and question_reward == cq_reward else 0)
                         if answer_reward == 1:
                             pass
                             #test_q2_correct.append(test_id)
@@ -499,8 +495,8 @@ def main():
                     context = context_
             
             # save batch cache
-            T.save(memory, exp_name + '_experiments/embedding_cache/' + ranker_name + '/' + str(cv_split) + '/test/memory.batchsave' + str(batch_serial))
-            #T.save(memory, exp_name + '_experiments/embedding_cache/' + ranker_name + str(cv_split) + '/test/memory.batchsave' + str(batch_serial))
+            T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
+            #T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
 
         for oi in range(len(test_scores)):
             test_oracle_scores.append(max(test_q0_scores[oi], test_q1_scores[oi], test_q2_scores[oi]))
@@ -535,4 +531,10 @@ def main():
         '''
         
 if __name__ == '__main__':
-    main()
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dataset_name', type = str, default = 'MSDialog')
+    parser.add_argument('--topn', type = int, default = 1)
+    parser.add_argument('--cv', type = int, default = -1)
+    parser.add_argument('--reranker_name', type = str, default = 'Poly')
+    args = parser.parse_args()
+    main(args)

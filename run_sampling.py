@@ -90,8 +90,12 @@ def main(args):
     limit_memory(1*1e11)
 
     random.seed(2020)
-    train_dataset = ConversationDataset('data/' + args.dataset_name + '-Complete/train' + str(args.cv) + '/', batch_size, max_train_size)
-    test_dataset = ConversationDataset('data/' + args.dataset_name + '-Complete/test' + str(args.cv) + '/', batch_size, max_test_size)
+    if args.cv != -1:
+        train_dataset = ConversationDataset('data/' + args.dataset_name + '-Complete/train' + str(args.cv) + '/', batch_size, max_train_size)
+        test_dataset = ConversationDataset('data/' + args.dataset_name + '-Complete/test' + str(args.cv) + '/', batch_size, max_test_size)
+    else:
+        train_dataset = ConversationDataset('data/' + args.dataset_name + '-Complete/train/', batch_size, max_train_size)
+        test_dataset = ConversationDataset('data/' + args.dataset_name + '-Complete/test/' , batch_size, max_test_size)
     train_size = sum([len(b['conversations'].keys()) for b in train_dataset.batches]) 
     test_size = sum([len(b['conversations'].keys()) for b in test_dataset.batches]) 
     agent = Agent(lr=1e-4, input_dims = (3 + args.topn) * observation_dim + 1 + args.topn, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
@@ -128,15 +132,29 @@ def main(args):
     for var, obj in local_vars:
         print(var, get_size(obj))
     '''
+
+    if not os.path.exists(args.dataset_name + '_experiments/embedding_cache/'):
+        os.makedirs(args.dataset_name + '_experiments/embedding_cache/')
+    if not os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name ):
+        os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name )
+    if args.cv != -1:
+        os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv))
+
     for i in range(train_iter):
         train_scores, train_q0_scores, train_q1_scores, train_q2_scores, train_oracle_scores, train_base_scores, train_score_scores, train_text_scores = [],[],[],[],[],[],[],[]
         train_worse, train_q0_worse, train_q1_worse, train_q2_worse, train_oracle_worse, train_base_worse, train_score_worse, train_text_worse = [],[],[],[],[],[],[],[]
         #train_correct, train_q0_correct, train_q1_correct, train_q2_correct, train_oracle_correct, train_base_correct, train_score_correct,train_text_correct = [],[],[],[],[],[],[],[]
         for batch_serial, batch in enumerate(train_dataset.batches):
-            if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial)):
-                memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
+            if args.cv != -1:
+                if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial)):
+                    memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
+                else:
+                    memory = {}
             else:
-                memory = {}
+                if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/train/memory.batchsave' + str(batch_serial)):
+                    memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/train/memory.batchsave' + str(batch_serial))
+                else:
+                    memory = {}
             train_ids = list(batch['conversations'].keys())
             user = User(batch['conversations'], cq_reward = cq_reward, cq_penalty = cq_penalty)
             for conv_serial, train_id in enumerate(train_ids):
@@ -303,8 +321,10 @@ def main(args):
                     print("total:", total_toc - total_tic, "evaluation", evaluation_toc - evaluation_tic)
             
             # save memory per batch
-            T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
-            #T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name  + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
+            if args.cv != -1:
+                T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
+            else:
+                T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/train/memory.batchsave' + str(batch_serial))
 
         for oi in range(len(train_scores)):
             train_oracle_scores.append(max(train_q0_scores[oi], train_q1_scores[oi], train_q2_scores[oi]))
@@ -348,10 +368,16 @@ def main(args):
         agent.epsilon = 0
         
         for batch_serial, batch in enumerate(test_dataset.batches):
-            if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial)):
-                memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
+            if args.cv != -1:
+                if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial)):
+                    memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
+                else:
+                    memory = {}
             else:
-                memory = {}
+                if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/test/memory.batchsave' + str(batch_serial)):
+                    memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/test/memory.batchsave' + str(batch_serial))
+                else:
+                    memory = {}
             test_ids = list(batch['conversations'].keys())
             user = User(batch['conversations'], cq_reward = cq_reward, cq_penalty = cq_penalty)
             for conv_serial, test_id in enumerate(test_ids):
@@ -495,9 +521,11 @@ def main(args):
                     context = context_
             
             # save batch cache
-            T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
-            #T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
-
+            if args.cv != -1:
+                T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
+            else:
+                T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/test/memory.batchsave' + str(batch_serial))
+           
         for oi in range(len(test_scores)):
             test_oracle_scores.append(max(test_q0_scores[oi], test_q1_scores[oi], test_q2_scores[oi]))
             test_oracle_worse.append(min(test_q0_worse[oi], test_q1_worse[oi], test_q2_worse[oi]))

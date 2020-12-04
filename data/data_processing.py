@@ -33,7 +33,7 @@ if __name__ == "__main__":
     random.seed(2020)
     parser = argparse.ArgumentParser()
     parser.add_argument('--dataset_name', type = str, default = 'MSDialog')
-    parser.add_argument('--n_folds', type = int, default = 5)
+    parser.add_argument('--n_folds', type = int, default = 5) # only for MSDialog since it's small
     args = parser.parse_args()
     if not os.path.exists(args.dataset_name + '-Complete'):
         os.makedirs(args.dataset_name + '-Complete')

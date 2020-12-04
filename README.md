@@ -14,7 +14,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
     $ cd ParlAI
     $ python3 -u examples/train_model.py \
         --init-model zoo:pretrained_transformers/poly_model_huge_reddit/model \
-        -t fromfile:parlaiformat --fromfile_datapath ../data/MSDialog-parlai-answer \ # answer/question
+        -t fromfile:parlaiformat --fromfile_datapath ../data/MSDialog-parlai-answer \
         --model transformer/polyencoder --batchsize 4 --eval-batchsize 100 \
         --warmup_updates 100 --lr-scheduler-patience 0 --lr-scheduler-decay 0.4 \
         -lr 5e-05 --data-parallel True --history-size 20 --label-truncate 72 \
@@ -28,7 +28,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
         --embedding-size 768 --activation gelu --embeddings-scale False --n-segments 2 \
         --learn-embeddings True --polyencoder-type codes --poly-n-codes 64 \
         --poly-attention-type basic --dict-endtoken __start__ \
-        --model-file zoo:pretrained_transformers/model_poly/answer \ # answer/question
+        --model-file zoo:pretrained_transformers/model_poly/answer \
         --ignore-bad-candidates True  --eval-candidates batch
     ```
     This will download the poly-encoder checkpoints pretrained on reddit and fine-tune it on our preprocessed dataset. The fine-tuned model is save in ParlAI/data/models/pretrained_transformers/model_poly/.
@@ -37,7 +37,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
     $ cd ParlAI
     $ python3 -u examples/train_model.py \
         --init-model zoo:pretrained_transformers/bi_model_huge_reddit/model \
-        -t fromfile:parlaiformat --fromfile_datapath ../data/MSDialog-parlai-question \ # answer/question
+        -t fromfile:parlaiformat --fromfile_datapath ../data/MSDialog-parlai-question \
         --model transformer/biencoder --batchsize 4 --eval-batchsize 100 \
         --warmup_updates 100 --lr-scheduler-patience 0 \
         --lr-scheduler-decay 0.4 -lr 5e-05 --data-parallel True \
@@ -53,7 +53,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
         --n-positions 1024 --embedding-size 768 --activation gelu \
         --embeddings-scale False --n-segments 2 --learn-embeddings True \
         --share-word-embeddings False --dict-endtoken __start__ --fp16 True \
-        --model-file zoo:pretrained_transformers/model_bi/question\ # answer/question
+        --model-file zoo:pretrained_transformers/model_bi/question\
         --ignore-bad-candidates True  --eval-candidates batch
     ```
     The fine-tuning code is based on [ParlAI poly-encoder](https://github.com/facebookresearch/ParlAI/tree/master/projects/polyencoder/), but we modify several scripts for our needs. We do not recommended downloading the original ParlAI code and replace the ParlAI folder in this program. The original training of the encoders are done on 8 x GPU 32GB. We decrease the batch size and is able to run it on 4 x GPU 11GB (GeForce RTX 2080Ti).

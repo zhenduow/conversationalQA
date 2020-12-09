@@ -8,7 +8,8 @@ Train a model using parlai's standard training loop.
 
 For documentation, see parlai.scripts.train_model.
 """
-
+import sys
+sys.path.append('/uufs/chpc.utah.edu/common/home/u1207916/conversationalQA/ParlAI/')
 from parlai.scripts.train_model import TrainModel
 
 if __name__ == '__main__':

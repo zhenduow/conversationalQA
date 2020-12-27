@@ -19,7 +19,7 @@ from copy import deepcopy
 import argparse
 observation_dim = 768
 action_num = 2
-cq_reward = 0.21
+cq_reward = 0.11
 cq_penalty = cq_reward - 1
 agent_gamma = -cq_penalty
 train_iter = 10
@@ -31,24 +31,6 @@ max_test_size = int(0.25*max_train_size)
 def limit_memory(maxsize): 
     soft, hard = resource.getrlimit(resource.RLIMIT_AS) 
     resource.setrlimit(resource.RLIMIT_AS, (maxsize, hard)) 
-
-def get_size(obj, seen=None):
-    """Recursively finds size of objects"""
-    size = sys.getsizeof(obj)
-    if seen is None:
-        seen = set()
-    obj_id = id(obj)
-    if obj_id in seen:
-        return 0
-    seen.add(obj_id)
-    if isinstance(obj, dict):
-        size += sum([get_size(v, seen) for v in obj.values()])
-        size += sum([get_size(k, seen) for k in obj.keys()])
-    elif hasattr(obj, '__dict__'):
-        size += get_size(obj.__dict__, seen)
-    elif hasattr(obj, '__iter__') and not isinstance(obj, (str, bytes, bytearray)):
-        size += sum([get_size(i, seen) for i in obj])
-    return size
 
 def read_from_memory(query, context, memory):
     return memory[query]['embedding'], memory[query][context]['embedding'],\
@@ -103,23 +85,29 @@ def main(args):
     text_agent = TextAgent(lr = 1e-4, input_dims = (3 + args.topn) * observation_dim, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
     base_agent = BaseAgent(lr=1e-4, input_dims = 2 * observation_dim, n_actions = 2, weight_decay = 0.01)
     
+    if args.dataset_name == 'MSDialog':
+        reranker_prefix = ''
+    elif args.dataset_name == 'UDC':
+        reranker_prefix = 'udc'
+    elif args.dataset_name == 'Opendialkg':
+        reranker_prefix = 'open'
     # create rerankers
     if args.reranker_name == 'Poly':
         question_reranker = Interactive.main(model = 'transformer/polyencoder', \
-                            model_file = 'zoo:pretrained_transformers/model_poly/question',  \
+                            model_file = 'zoo:pretrained_transformers/model_poly/' + reranker_prefix + 'question',  \
                             encode_candidate_vecs = False,  eval_candidates = 'inline', interactive_candidates = 'inline',
                             return_cand_scores = True)
         answer_reranker = Interactive.main(model = 'transformer/polyencoder', \
-                            model_file = 'zoo:pretrained_transformers/model_poly/answer',  \
+                            model_file = 'zoo:pretrained_transformers/model_poly/' + reranker_prefix + 'answer',  \
                             encode_candidate_vecs = False,  eval_candidates = 'inline', interactive_candidates = 'inline',
                             return_cand_scores = True)
     elif args.reranker_name == 'Bi':
         bi_question_reranker = Interactive.main(model = 'transformer/biencoder', \
-                            model_file = 'zoo:pretrained_transformers/model_bi/question',  \
+                            model_file = 'zoo:pretrained_transformers/model_bi/' + reranker_prefix + 'question',  \
                             encode_candidate_vecs = False,  eval_candidates = 'inline', interactive_candidates = 'inline',
                             return_cand_scores = True)
         bi_answer_reranker = Interactive.main(model = 'transformer/biencoder', \
-                            model_file = 'zoo:pretrained_transformers/model_bi/answer',  \
+                            model_file = 'zoo:pretrained_transformers/model_bi/' + reranker_prefix + 'answer',  \
                             encode_candidate_vecs = False,  eval_candidates = 'inline', interactive_candidates = 'inline',
                             return_cand_scores = True)
         
@@ -137,8 +125,11 @@ def main(args):
         os.makedirs(args.dataset_name + '_experiments/embedding_cache/')
     if not os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name ):
         os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name )
-    if args.cv != -1:
-        os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv))
+        if args.cv != -1:
+            os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv))
+        else:
+            os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/train')
+            os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/test' )
 
     for i in range(train_iter):
         train_scores, train_q0_scores, train_q1_scores, train_q2_scores, train_oracle_scores, train_base_scores, train_score_scores, train_text_scores = [],[],[],[],[],[],[],[]
@@ -208,8 +199,11 @@ def main(args):
                     text_action = text_agent.choose_action(query_embedding, context_embedding, questions_embeddings, answers_embeddings)
 
                     evaluation_tic = time.perf_counter()
-                    context_, question_reward, q_done, good_question = user.update_state(train_id, context, 1, questions, answers, args.topn = args.topn)
-                    _, answer_reward, _, _ = user.update_state(train_id, context, 0, questions, answers, args.topn = args.topn)
+                    context_, question_reward, q_done, good_question = user.update_state(train_id, context, 1, questions, answers, use_top_k = args.topn)
+                    try:
+                        _, answer_reward, _, _ = user.update_state(train_id, context, 0, questions, answers, use_top_k = args.topn)
+                    except:
+                        print("Error happened in conversation", train_id, context, answers)
                     action_reward = [answer_reward, question_reward][action]
                     evaluation_toc = time.perf_counter()
                     print('action', action, 'base_action', base_action, 'score_action', score_action,'text_action', text_action, 'answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
@@ -259,7 +253,7 @@ def main(args):
                             #train_correct.append(train_id) 
                             pass
                         train_worse.append(1 if (action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
-                            or (action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
+                            or (action == 1  and question_reward == cq_penalty) else 0)
 
                     if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)) and not base_stop:
                         base_stop = True
@@ -268,7 +262,7 @@ def main(args):
                             #train_base_correct.append(train_id)
                             pass
                         train_base_worse.append(1 if (base_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
-                            or (base_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
+                            or (base_action == 1  and question_reward == cq_penalty) else 0)
                     
                     if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)) and not score_stop:
                         score_stop = True
@@ -277,7 +271,7 @@ def main(args):
                             pass
                             #train_score_correct.append(train_id)
                         train_score_worse.append(1 if (score_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
-                            or (score_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
+                            or (score_action == 1  and question_reward == cq_penalty) else 0)
                     
                     if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)) and not text_stop:
                         text_stop = True
@@ -286,7 +280,7 @@ def main(args):
                             pass
                             #train_text_correct.append(train_id)
                         train_text_worse.append(1 if (text_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
-                            or (text_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
+                            or (text_action == 1  and question_reward == cq_penalty) else 0)
 
                     if n_round == 0:
                         train_q0_scores.append(answer_reward)
@@ -428,8 +422,8 @@ def main(args):
                     score_action = score_agent.choose_action(questions_scores, answers_scores)
                     text_action = text_agent.choose_action(query_embedding, context_embedding, questions_embeddings, answers_embeddings)
                     
-                    context_, question_reward, q_done, good_question = user.update_state(test_id, context, 1, questions, answers, args.topn = args.topn)
-                    _, answer_reward, _, _ = user.update_state(test_id, context, 0, questions, answers, args.topn = args.topn)
+                    context_, question_reward, q_done, good_question = user.update_state(test_id, context, 1, questions, answers, use_top_k = args.topn)
+                    _, answer_reward, _, _ = user.update_state(test_id, context, 0, questions, answers, use_top_k = args.topn)
                     action_reward = [answer_reward, question_reward][action]
                     print('action', action, 'base_action', base_action, 'score_action', score_action,'text_action', text_action, 'answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
 
@@ -461,7 +455,7 @@ def main(args):
                             pass
                             #test_correct.append(test_id)
                         test_worse.append(1 if (action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
-                            or (action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
+                            or (action == 1  and question_reward == cq_penalty) else 0)
 
                     if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)) and not base_stop:
                         base_stop = True
@@ -470,7 +464,7 @@ def main(args):
                             pass
                             #test_base_correct.append(test_id)
                         test_base_worse.append(1 if (base_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
-                            or (base_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
+                            or (base_action == 1  and question_reward == cq_penalty) else 0)
 
                     if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)) and not score_stop:
                         score_stop = True
@@ -479,7 +473,7 @@ def main(args):
                             pass
                             #test_score_correct.append(test_id)
                         test_score_worse.append(1 if (score_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
-                            or (score_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
+                            or (score_action == 1  and question_reward == cq_penalty) else 0)
                     
                     if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)) and not text_stop:
                         text_stop = True
@@ -488,7 +482,7 @@ def main(args):
                             pass
                             #test_text_correct.append(test_id)
                         test_text_worse.append(1 if (text_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
-                            or (text_action == 1 and answer_reward > 0 and question_reward == cq_penalty) else 0)
+                            or (text_action == 1  and question_reward == cq_penalty) else 0)
 
                     if n_round == 0:
                         test_q0_scores.append(answer_reward)

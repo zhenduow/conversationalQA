@@ -40,7 +40,7 @@ class User:
                 1, if the question is in the given conversation but not followed up with response in the database. In this case, the question maybe an answer.
         '''
         is_off_topic = True
-        question_pos = -1
+        question_pos = 10000
         for pos, utterance in enumerate(self.dataset[conversation_id]):
             if question == utterance:
                 is_off_topic = False
@@ -73,6 +73,7 @@ class User:
         Read the agent action and update the user state, compute reward and return them for save.
         The agent action should be 0 (retrieve an answer) or 1 (ask clarifying question)
         '''
+        patience_used = 0
         if action == 0:
             # agent answer the question, evaluate the answer
             n = len(top_n_answer)
@@ -83,10 +84,16 @@ class User:
                     true_rel[i] = self.respond_to_question(conversation_id, top_n_answer[i])
                 except:
                     print("Error in conversation: " + conversation_id)
-            reward = sum([n/(id+1) for id,n in enumerate(true_rel)])
+            reward = 0
+            for i, rel in enumerate(true_rel):
+                try:
+                    reward += rel/(i+1)
+                except:
+                    reward += 0
+            
             if reward > 1:
                 reward = 1
-            return context_, reward, True, None
+            return context_, reward, True, None, patience_used
         elif action == 1:
             # agent asks clarifying question, find corresponding answer in the dataset and return
             done = False
@@ -104,9 +111,10 @@ class User:
             if 0 <= correct_question_id <= (use_top_k - 1):
                 reward = self.cq_reward
                 context_ = context + ' [SEP] ' + top_n_question[correct_question_id] + ' [SEP] ' + user_response_text
+                patience_used = correct_question_id
             else:
                 # the agent asks a bad question  
                 reward = self.cq_penalty
                 done = True
                 context_ = context + ' [SEP] ' + top_n_question[0] + ' [SEP] ' + 'This question is not relevant.'
-            return context_, reward, done, top_n_question[correct_question_id]
+            return context_, reward, done, top_n_question[correct_question_id], patience_used

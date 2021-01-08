@@ -17,20 +17,28 @@ import time
 from parlai.scripts.interactive import Interactive, rerank
 from copy import deepcopy
 import argparse
+import psutil
 observation_dim = 768
 action_num = 2
 cq_reward = 0.11
 cq_penalty = cq_reward - 1
 agent_gamma = -cq_penalty
-train_iter = 10
+train_iter = 50
 batch_size = 100
-max_round = 5
+max_round = 5 # max conversation round
 max_train_size = 10000
 max_test_size = int(0.25*max_train_size)
 
 def limit_memory(maxsize): 
     soft, hard = resource.getrlimit(resource.RLIMIT_AS) 
     resource.setrlimit(resource.RLIMIT_AS, (maxsize, hard)) 
+
+def generate_embedding_no_grad(text, tokenizer, embedding_model):
+    with T.no_grad():
+        tokenized_context_ = T.tensor([tokenizer.encode(text, add_special_tokens=True)])
+        context_embedding_ = T.squeeze(embedding_model(tokenized_context_)[0])[0] 
+        del tokenized_context_
+        return context_embedding_
 
 def read_from_memory(query, context, memory):
     return memory[query]['embedding'], memory[query][context]['embedding'],\
@@ -42,7 +50,8 @@ def save_to_memory(query, context, memory, questions, answers, questions_scores,
     if query not in memory.keys():
         memory[query] = {}
         with T.no_grad():
-            memory[query]['embedding'] = T.squeeze(embedding_model(T.tensor([tokenizer.encode(query, add_special_tokens=True)]))[0])[0]
+            tokenized_query = T.tensor([tokenizer.encode(query, add_special_tokens=True)])
+            memory[query]['embedding'] = T.squeeze(embedding_model(tokenized_query)[0])[0]
     
     memory[query][context] = {}
     with T.no_grad():
@@ -69,7 +78,7 @@ def generate_batch_answer_candidates(batch, conversation_id, total_candidates):
 
 def main(args):
     logging.getLogger().setLevel(logging.INFO)
-    limit_memory(1*1e11)
+    limit_memory(1e11)
 
     random.seed(2020)
     if args.cv != -1:
@@ -80,10 +89,10 @@ def main(args):
         test_dataset = ConversationDataset('data/' + args.dataset_name + '-Complete/test/' , batch_size, max_test_size)
     train_size = sum([len(b['conversations'].keys()) for b in train_dataset.batches]) 
     test_size = sum([len(b['conversations'].keys()) for b in test_dataset.batches]) 
-    agent = Agent(lr=1e-4, input_dims = (3 + args.topn) * observation_dim + 1 + args.topn, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
+    agent = Agent(lr = 1e-4, input_dims = (3 + args.topn) * observation_dim + 1 + args.topn, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
     score_agent = ScoreAgent(lr = 1e-4, input_dims = 1 + args.topn, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.0)
     text_agent = TextAgent(lr = 1e-4, input_dims = (3 + args.topn) * observation_dim, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
-    base_agent = BaseAgent(lr=1e-4, input_dims = 2 * observation_dim, n_actions = 2, weight_decay = 0.01)
+    base_agent = BaseAgent(lr = 1e-4, input_dims = 2 * observation_dim, n_actions = 2, weight_decay = 0.01)
     
     if args.dataset_name == 'MSDialog':
         reranker_prefix = ''
@@ -101,6 +110,7 @@ def main(args):
                             model_file = 'zoo:pretrained_transformers/model_poly/' + reranker_prefix + 'answer',  \
                             encode_candidate_vecs = False,  eval_candidates = 'inline', interactive_candidates = 'inline',
                             return_cand_scores = True)
+        print("Loading rerankers:", 'model_poly/' + reranker_prefix + 'answer', 'model_poly/' + reranker_prefix + 'question')
     elif args.reranker_name == 'Bi':
         bi_question_reranker = Interactive.main(model = 'transformer/biencoder', \
                             model_file = 'zoo:pretrained_transformers/model_bi/' + reranker_prefix + 'question',  \
@@ -110,7 +120,7 @@ def main(args):
                             model_file = 'zoo:pretrained_transformers/model_bi/' + reranker_prefix + 'answer',  \
                             encode_candidate_vecs = False,  eval_candidates = 'inline', interactive_candidates = 'inline',
                             return_cand_scores = True)
-        
+        print("Loading rerankers:", 'model_bi/' + reranker_prefix + 'answer', 'model_bi/' + reranker_prefix + 'question')
 
     # embedding model
     tokenizer = AutoTokenizer.from_pretrained('xlnet-base-cased')
@@ -125,10 +135,15 @@ def main(args):
         os.makedirs(args.dataset_name + '_experiments/embedding_cache/')
     if not os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name ):
         os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name )
-        if args.cv != -1:
+    if args.cv != -1:
+        if not os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv)):
             os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv))
-        else:
+            os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train')
+            os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test')
+    else:
+        if not os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/train' ):
             os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/train')
+        if not os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/test' ):
             os.makedirs(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/test' )
 
     for i in range(train_iter):
@@ -136,26 +151,29 @@ def main(args):
         train_worse, train_q0_worse, train_q1_worse, train_q2_worse, train_oracle_worse, train_base_worse, train_score_worse, train_text_worse = [],[],[],[],[],[],[],[]
         #train_correct, train_q0_correct, train_q1_correct, train_q2_correct, train_oracle_correct, train_base_correct, train_score_correct,train_text_correct = [],[],[],[],[],[],[],[]
         for batch_serial, batch in enumerate(train_dataset.batches):
+            print(dict(psutil.virtual_memory()._asdict()))
             if args.cv != -1:
                 if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial)):
-                    memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
+                    with T.no_grad():
+                        memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
                 else:
                     memory = {}
             else:
                 if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/train/memory.batchsave' + str(batch_serial)):
-                    memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/train/memory.batchsave' + str(batch_serial))
+                    with T.no_grad():
+                        memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/train/memory.batchsave' + str(batch_serial))
                 else:
                     memory = {}
             train_ids = list(batch['conversations'].keys())
             user = User(batch['conversations'], cq_reward = cq_reward, cq_penalty = cq_penalty)
             for conv_serial, train_id in enumerate(train_ids):
-                
                 query = user.initialize_state(train_id)
                 if query == '': # UDC dataset has some weird stuff
                     continue
                 context = ''
                 ignore_questions = []
                 n_round = 0
+                patience_used = 0
                 q_done = False
                 stop, base_stop, score_stop, text_stop = False,False,False,False
                 print('-------- train batch %.0f conversation %.0f/%.0f --------' % (batch_serial, batch_size*(batch_serial) + conv_serial + 1, train_size))
@@ -199,11 +217,10 @@ def main(args):
                     text_action = text_agent.choose_action(query_embedding, context_embedding, questions_embeddings, answers_embeddings)
 
                     evaluation_tic = time.perf_counter()
-                    context_, question_reward, q_done, good_question = user.update_state(train_id, context, 1, questions, answers, use_top_k = args.topn)
-                    try:
-                        _, answer_reward, _, _ = user.update_state(train_id, context, 0, questions, answers, use_top_k = args.topn)
-                    except:
-                        print("Error happened in conversation", train_id, context, answers)
+                    #context_, question_reward, q_done, good_question, patience_this_turn = user.update_state(train_id, context, 1, questions, answers, use_top_k = args.topn - patience_used)
+                    context_, question_reward, q_done, good_question, patience_this_turn = user.update_state(train_id, context, 1, questions, answers, use_top_k = args.topn)
+                    patience_used = max(patience_used + patience_this_turn, args.topn)
+                    _, answer_reward, _, _, _ = user.update_state(train_id, context, 0, questions, answers, use_top_k = args.topn - patience_used)
                     action_reward = [answer_reward, question_reward][action]
                     evaluation_toc = time.perf_counter()
                     print('action', action, 'base_action', base_action, 'score_action', score_action,'text_action', text_action, 'answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
@@ -230,8 +247,7 @@ def main(args):
                         query_embedding, context_embedding_, questions_, answers_, questions_embeddings_, answers_embeddings_, questions_scores_, answers_scores_ = read_from_memory(query, context_, memory)
 
                     else:
-                        with T.no_grad():
-                            context_embedding_ = T.squeeze(embedding_model(T.tensor([tokenizer.encode(context_, add_special_tokens=True)]))[0])[0] 
+                        context_embedding_ = generate_embedding_no_grad(context_, tokenizer, embedding_model)
                         questions_, answers_, questions_embeddings_, answers_embeddings_, questions_scores_, answers_scores_ = None, None, None, None, None, None
 
                     agent.joint_learn((query_embedding, context_embedding, questions_embeddings, answers_embeddings, questions_scores, answers_scores),\
@@ -312,13 +328,15 @@ def main(args):
                     context = context_
                     n_round += 1
                     total_toc = time.perf_counter()
-                    print("total:", total_toc - total_tic, "evaluation", evaluation_toc - evaluation_tic)
             
             # save memory per batch
             if args.cv != -1:
                 T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial))
             else:
                 T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/train/memory.batchsave' + str(batch_serial))
+            
+            del memory
+            T.cuda.empty_cache()
 
         for oi in range(len(train_scores)):
             train_oracle_scores.append(max(train_q0_scores[oi], train_q1_scores[oi], train_q2_scores[oi]))
@@ -364,12 +382,14 @@ def main(args):
         for batch_serial, batch in enumerate(test_dataset.batches):
             if args.cv != -1:
                 if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial)):
-                    memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
+                    with T.no_grad():
+                        memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
                 else:
                     memory = {}
             else:
                 if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/test/memory.batchsave' + str(batch_serial)):
-                    memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/test/memory.batchsave' + str(batch_serial))
+                    with T.no_grad():
+                        memory = T.load(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/test/memory.batchsave' + str(batch_serial))
                 else:
                     memory = {}
             test_ids = list(batch['conversations'].keys())
@@ -381,6 +401,7 @@ def main(args):
                 context = ''
                 ignore_questions = []
                 n_round = 0
+                patience_used = 0
                 q_done = False
                 stop, base_stop, score_stop, text_stop = False,False,False,False
                 print('-------- test batch %.0f conversation %.0f/%.0f --------' % (batch_serial, batch_size*(batch_serial) + conv_serial + 1, test_size))
@@ -422,8 +443,10 @@ def main(args):
                     score_action = score_agent.choose_action(questions_scores, answers_scores)
                     text_action = text_agent.choose_action(query_embedding, context_embedding, questions_embeddings, answers_embeddings)
                     
-                    context_, question_reward, q_done, good_question = user.update_state(test_id, context, 1, questions, answers, use_top_k = args.topn)
-                    _, answer_reward, _, _ = user.update_state(test_id, context, 0, questions, answers, use_top_k = args.topn)
+                    #context_, question_reward, q_done, good_question, patience_this_turn = user.update_state(test_id, context, 1, questions, answers, use_top_k = args.topn - patience_used)
+                    context_, question_reward, q_done, good_question, patience_this_turn = user.update_state(test_id, context, 1, questions, answers, use_top_k = args.topn)
+                    patience_used = max(patience_used + patience_this_turn, args.topn)
+                    _, answer_reward, _, _, _ = user.update_state(test_id, context, 0, questions, answers, use_top_k = args.topn - patience_used)
                     action_reward = [answer_reward, question_reward][action]
                     print('action', action, 'base_action', base_action, 'score_action', score_action,'text_action', text_action, 'answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
 
@@ -519,7 +542,11 @@ def main(args):
                 T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/test/memory.batchsave' + str(batch_serial))
             else:
                 T.save(memory, args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/test/memory.batchsave' + str(batch_serial))
-           
+
+            del memory
+            T.cuda.empty_cache()
+
+          
         for oi in range(len(test_scores)):
             test_oracle_scores.append(max(test_q0_scores[oi], test_q1_scores[oi], test_q2_scores[oi]))
             test_oracle_worse.append(min(test_q0_worse[oi], test_q1_worse[oi], test_q2_worse[oi]))

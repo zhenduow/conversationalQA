@@ -1,6 +1,9 @@
 # Controlling the Risk of Conversational Search via Reinforcement Learning
 A risk-aware conversational search system consisting of pretrained answer and question rerankers and a decision maker trained by reinforcement learning.
 
+## Package requirements (recommended versions).
+1. torch==1.4.0
+1. transformers==3.4.0
 
 ## How to use
 1. Preprocess data. Here we use [MSDialog dataset](https://ciir.cs.umass.edu/downloads/msdialog/) as example. You can also set dataset_name to be 'UDC' for [Ubuntu Dialog Corpus](http://dataset.cs.mcgill.ca/ubuntu-corpus-1.0/). We also plan to test it on [Opendialkg](https://github.com/facebookresearch/opendialkg) recently.

@@ -11,8 +11,8 @@ A risk-aware conversational search system consisting of pretrained answer and qu
     $ cd data
     $ python3 data_processing.py --dataset_name MSDialog
     ```
-    This will process and filter the data. All conversations that meet the filtering criterion are saved in MSDialog-Complete and will be automatically split into training and testing set. The others are save in MSDialog-Incomplete. The former is used for the main experiments and the latter is used for fine-tuning the rerankers only.
-1. Fine-tune pretrained reranker checkpoints on dataset (MSDialog as example)
+    This will process and filter the data. All conversations that meet the filtering criterion are saved in MSDialog-Complete and will be automatically split into training and testing set. The others are save in MSDialog-Incomplete. The former is used for the main experiments and the latter is used for fine-tuning the rerankers only. The data processing code uses `random.seed(2020)` to fix the result of data generation.
+1. Fine-tune pretrained reranker checkpoints on dataset (MSDialog as example) 
     ```
     $ cd ParlAI
     $ python3 -u examples/train_model.py \

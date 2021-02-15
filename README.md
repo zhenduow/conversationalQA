@@ -70,19 +70,13 @@ A risk-aware conversational search system consisting of pretrained answer and qu
     
 Please cite the following work if you use this code repository in your work:
 
-`
-
+```
 @misc{wang2021controlling,
       title={Controlling the Risk of Conversational Search via Reinforcement Learning}, 
-      
       author={Zhenduo Wang and Qingyao Ai},
-      
       year={2021},
-      
       eprint={2101.06327},
-      
       archivePrefix={arXiv},
-      
       primaryClass={cs.IR}
 }
-`
+```

@@ -68,6 +68,8 @@ A risk-aware conversational search system consisting of pretrained answer and qu
     `--dataset_name` can be 'MSDialog', 'UDC', or 'Opendialkg' currently. `--reranker_name` can be 'Poly' or 'Bi' currently. `--topn` means the top n reranked candidates are considered correct, i.e. `--topn ` computes recall@1. The MSDialog dataset is too small, so it's recommended to run it using cross validation. When the dataset size is big enough or there is no need to run cross validation, simply use `--cv -1` to turn off cross validation. The experiment would take a couple of hours to one day. So, it's recommended to save the results to a log file.
     
     
+## Reference
+
 Please cite the following work if you use this code repository in your work:
 
 ```

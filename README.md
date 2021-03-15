@@ -40,7 +40,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
     If you get an error of dictionary size mismatching, this is because that the pretrained model checkpoints has a dictionary that's larger than the fine-tune dataset. To solve this problem, before running the fine-tuning script, copy the downloaded pretrained dict file `ParlAI/data/models/pretrained_transformers/poly_model_huge_reddit/model.dict` to `ParlAI/data/models/pretrained_transformers/model_poly/` and rename them to `answer`. Then run the above fine-tuning script. Similar for the bi-encoder experiments.
 
     
-    For bi-encoder fine-tuning, use the following command. When getting the dictionary size error, copy `ParlAI/data/models/pretrained_transformers/poly_model_huge_reddit/model.dict` to `ParlAI/data/models/pretrained_transformers/model_poly/` twice and rename them to `answer.dict`.:
+    For bi-encoder fine-tuning, use the following command. When getting the dictionary size error, copy `ParlAI/data/models/pretrained_transformers/poly_model_huge_reddit/model.dict` to `ParlAI/data/models/pretrained_transformers/model_poly/` and rename them to `answer.dict`.:
     ```
     $ cd ParlAI
     $ python3 -u examples/train_model.py \

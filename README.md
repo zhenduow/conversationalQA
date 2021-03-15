@@ -37,7 +37,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
     ```
     This will download the poly-encoder checkpoints pretrained on reddit and fine-tune it on our preprocessed dataset. The fine-tuned model is save in ParlAI/data/models/pretrained_transformers/model_poly/.
     
-    If you get an error of dictionary size mismatching, this is because that the pretrained model checkpoints has a dictionary that's larger than the fine-tune dataset. To solve this problem, before running the fine-tuning script, copy the downloaded pretrained dict file `ParlAI/data/models/pretrained_transformers/poly_model_huge_reddit/model.dict` to `ParlAI/data/models/pretrained_transformers/model_poly/` and rename them to `answer`. Then run the above fine-tuning script. Similar for the bi-encoder experiments.
+    If you get an error of dictionary size mismatching, this is because that the pretrained model checkpoints has a dictionary that's larger than the fine-tune dataset. To solve this problem, before running the fine-tuning script, copy the downloaded pretrained dict file `ParlAI/data/models/pretrained_transformers/poly_model_huge_reddit/model.dict` to `ParlAI/data/models/pretrained_transformers/model_poly/` and rename them to `answer.dict`. Then run the above fine-tuning script. Similar for the bi-encoder experiments.
 
     
     For bi-encoder fine-tuning, use the following command. When getting the dictionary size error, copy `ParlAI/data/models/pretrained_transformers/poly_model_huge_reddit/model.dict` to `ParlAI/data/models/pretrained_transformers/model_poly/` and rename them to `answer.dict`.:

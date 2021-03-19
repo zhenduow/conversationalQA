@@ -13,7 +13,7 @@ A risk-aware conversational search system consisting of pretrained answer and qu
     $ python3 data_processing.py --dataset_name MSDialog
     ```
     This will process and filter the data. All conversations that meet the filtering criterion are saved in MSDialog-Complete and will be automatically split into training and testing set. The others are save in MSDialog-Incomplete. The former is used for the main experiments and the latter is used for fine-tuning the rerankers only. The data processing code uses `random.seed(2020)` to fix the result of data generation.
-1. Fine-tune pretrained reranker checkpoints on dataset (MSDialog as example). The training of the rerankers are based on [ParlAI](https://github.com/facebookresearch/ParlAI)
+1. Fine-tune pretrained reranker checkpoints on both the answer reranking and question reranking training samples (MSDialog as example). The training of the rerankers are based on [ParlAI](https://github.com/facebookresearch/ParlAI)
     ```
     $ cd ParlAI
     $ python3 -u examples/train_model.py \
@@ -35,6 +35,26 @@ A risk-aware conversational search system consisting of pretrained answer and qu
         --model-file zoo:pretrained_transformers/model_poly/answer \
         --ignore-bad-candidates True  --eval-candidates batch
     ```
+    ```
+    $ python3 -u examples/train_model.py \
+        --init-model zoo:pretrained_transformers/poly_model_huge_reddit/model \
+        -t fromfile:parlaiformat --fromfile_datapath ../data/MSDialog-parlai-question \
+        --model transformer/polyencoder --batchsize 4 --eval-batchsize 100 \
+        --warmup_updates 100 --lr-scheduler-patience 0 --lr-scheduler-decay 0.4 \
+        -lr 5e-05 --data-parallel True --history-size 20 --label-truncate 72 \
+        --text-truncate 360 --num-epochs 12.0 --max_train_time 200000 -veps 0.5 \
+        -vme 8000 --validation-metric accuracy --validation-metric-mode max \
+        --save-after-valid True --log_every_n_secs 20 --candidates batch --fp16 True \
+        --dict-tokenizer bpe --dict-lower True --optimizer adamax --output-scaling 0.06 \
+        --variant xlm --reduction-type mean --share-encoders False \
+        --learn-positional-embeddings True --n-layers 12 --n-heads 12 --ffn-size 3072 \
+        --attention-dropout 0.1 --relu-dropout 0.0 --dropout 0.1 --n-positions 1024 \
+        --embedding-size 768 --activation gelu --embeddings-scale False --n-segments 2 \
+        --learn-embeddings True --polyencoder-type codes --poly-n-codes 64 \
+        --poly-attention-type basic --dict-endtoken __start__ \
+        --model-file zoo:pretrained_transformers/model_poly/question \
+        --ignore-bad-candidates True  --eval-candidates batch
+    ```
     This will download the poly-encoder checkpoints pretrained on reddit and fine-tune it on our preprocessed dataset. The fine-tuned model is save in ParlAI/data/models/pretrained_transformers/model_poly/.
     
     If you get an error of dictionary size mismatching, this is because that the pretrained model checkpoints has a dictionary that's larger than the fine-tune dataset. To solve this problem, before running the fine-tuning script, copy the downloaded pretrained dict file `ParlAI/data/models/pretrained_transformers/poly_model_huge_reddit/model.dict` to `ParlAI/data/models/pretrained_transformers/model_poly/` and rename them to `answer.dict`. Then run the above fine-tuning script. Similar for the bi-encoder experiments.
@@ -43,6 +63,28 @@ A risk-aware conversational search system consisting of pretrained answer and qu
     For bi-encoder fine-tuning, use the following command. When getting the dictionary size error, copy `ParlAI/data/models/pretrained_transformers/poly_model_huge_reddit/model.dict` to `ParlAI/data/models/pretrained_transformers/model_poly/` and rename them to `answer.dict`.:
     ```
     $ cd ParlAI
+    $ python3 -u examples/train_model.py \
+        --init-model zoo:pretrained_transformers/bi_model_huge_reddit/model \
+        -t fromfile:parlaiformat --fromfile_datapath ../data/MSDialog-parlai-answer \
+        --model transformer/biencoder --batchsize 4 --eval-batchsize 100 \
+        --warmup_updates 100 --lr-scheduler-patience 0 \
+        --lr-scheduler-decay 0.4 -lr 5e-05 --data-parallel True \
+        --history-size 20 --label-truncate 72 --text-truncate 360 \
+        --num-epochs 12.0 --max_train_time 200000 -veps 0.5 -vme 8000 \
+        --validation-metric accuracy --validation-metric-mode max \
+        --save-after-valid True --log_every_n_secs 20 --candidates batch \
+        --dict-tokenizer bpe --dict-lower True --optimizer adamax \
+        --output-scaling 0.06 \
+        --variant xlm --reduction-type mean --share-encoders False \
+        --learn-positional-embeddings True --n-layers 12 --n-heads 12 \
+        --ffn-size 3072 --attention-dropout 0.1 --relu-dropout 0.0 --dropout 0.1 \
+        --n-positions 1024 --embedding-size 768 --activation gelu \
+        --embeddings-scale False --n-segments 2 --learn-embeddings True \
+        --share-word-embeddings False --dict-endtoken __start__ --fp16 True \
+        --model-file zoo:pretrained_transformers/model_bi/answer\
+        --ignore-bad-candidates True  --eval-candidates batch
+    ```
+    ```
     $ python3 -u examples/train_model.py \
         --init-model zoo:pretrained_transformers/bi_model_huge_reddit/model \
         -t fromfile:parlaiformat --fromfile_datapath ../data/MSDialog-parlai-question \

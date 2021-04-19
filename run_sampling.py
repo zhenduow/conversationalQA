@@ -9,7 +9,6 @@ import resource
 import csv
 import os
 import torch as T
-import OpenMatch as om
 from transformers import AutoTokenizer, AutoModel
 from scipy.special import softmax
 import sys

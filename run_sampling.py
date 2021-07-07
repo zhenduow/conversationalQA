@@ -1,4 +1,4 @@
-dddddddfrom user import User
+from user import User
 from dataset import ConversationDataset
 from agent import Agent, BaseAgent, ScoreAgent, TextAgent
 import logging

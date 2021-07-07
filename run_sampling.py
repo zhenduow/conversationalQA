@@ -1,4 +1,4 @@
-from user import User
+dddddddfrom user import User
 from dataset import ConversationDataset
 from agent import Agent, BaseAgent, ScoreAgent, TextAgent
 import logging
@@ -260,43 +260,48 @@ def main(args):
                         answer_reward, question_reward,\
                         (query_embedding, context_embedding_, questions_embeddings_, answers_embeddings_))
 
-                    # evaluation
-                    if (action == 0 or (action == 1 and question_reward == cq_penalty)) and not stop:
-                        stop = True 
-                        train_scores.append(answer_reward if action == 0 else 0)
-                        if action == 0 and answer_reward == 1.0:
-                            #train_correct.append(train_id) 
-                            pass
+                    # non-deterministic methods evaluation
+                    if not stop:
                         train_worse.append(1 if (action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (action == 1  and question_reward == cq_penalty) else 0)
-
-                    if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)) and not base_stop:
-                        base_stop = True
-                        train_base_scores.append(answer_reward if base_action == 0 else 0)
-                        if base_action == 0 and answer_reward == 1.0:
-                            #train_base_correct.append(train_id)
-                            pass
+                        if (action == 0 or (action == 1 and question_reward == cq_penalty)):
+                            stop = True 
+                            train_scores.append(answer_reward if action == 0 else 0)
+                            if action == 0 and answer_reward == 1.0:
+                                #train_correct.append(train_id) 
+                                pass
+                        
+                    if not base_stop:
                         train_base_worse.append(1 if (base_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (base_action == 1  and question_reward == cq_penalty) else 0)
-                    
-                    if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)) and not score_stop:
-                        score_stop = True
-                        train_score_scores.append(answer_reward if score_action == 0 else 0)
-                        if score_action == 0 and answer_reward == 1.0:
-                            pass
-                            #train_score_correct.append(train_id)
+                        if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)):
+                            base_stop = True
+                            train_base_scores.append(answer_reward if base_action == 0 else 0)
+                            if base_action == 0 and answer_reward == 1.0:
+                                #train_base_correct.append(train_id)
+                                pass
+                        
+                    if not score_stop:
                         train_score_worse.append(1 if (score_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (score_action == 1  and question_reward == cq_penalty) else 0)
-                    
-                    if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)) and not text_stop:
-                        text_stop = True
-                        train_text_scores.append(answer_reward if text_action == 0 else 0)
-                        if text_action == 0 and answer_reward == 1.0:
-                            pass
-                            #train_text_correct.append(train_id)
+                        if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)):
+                            score_stop = True
+                            train_score_scores.append(answer_reward if score_action == 0 else 0)
+                            if score_action == 0 and answer_reward == 1.0:
+                                pass
+                                #train_score_correct.append(train_id)
+                        
+                    if not text_stop:
                         train_text_worse.append(1 if (text_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (text_action == 1  and question_reward == cq_penalty) else 0)
-
+                        if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)):
+                            text_stop = True
+                            train_text_scores.append(answer_reward if text_action == 0 else 0)
+                            if text_action == 0 and answer_reward == 1.0:
+                                pass
+                                #train_text_correct.append(train_id)
+                        
+                    # deterministic method evaluation
                     if n_round == 0:
                         train_q0_scores.append(answer_reward)
                         train_q0_worse.append(1 if answer_reward < float(1/args.topn) and question_reward == cq_reward else 0)
@@ -359,16 +364,6 @@ def main(args):
         print("text acc %.6f, avgmrr %.6f, worse decisions %.6f" % 
             (np.mean([1 if score == 1 else 0 for score in train_text_scores]), np.mean(train_text_scores), np.mean(train_text_worse)))
 
-        '''
-        print(train_correct)
-        print(train_q0_correct)
-        print(train_q1_correct)
-        print(train_q2_correct)
-        print(train_oracle_correct)
-        print(train_base_correct)
-        print(train_score_correct)
-        print(train_text_correct)
-        '''
         print("avg loss", np.mean(agent.loss_history))
 
         ## test
@@ -469,43 +464,49 @@ def main(args):
                             memory = save_to_memory(query, context_, memory, questions_, answers_, questions_scores_, answers_scores_, tokenizer, embedding_model)
                         query_embedding, context_embedding_, questions_, answers_, questions_embeddings_, answers_embeddings_, questions_scores_, answers_scores_ = read_from_memory(query, context_, memory)
 
-                    # evaluation
-                    if (action == 0 or (action == 1 and question_reward == cq_penalty)) and not stop:
-                        stop = True
-                        test_scores.append(answer_reward if action == 0 else 0)
-                        if action == 0 and answer_reward == 1.0:
-                            pass
-                            #test_correct.append(test_id)
+                    # non-deterministic methods evaluation
+                    if not stop:
                         test_worse.append(1 if (action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (action == 1  and question_reward == cq_penalty) else 0)
-
-                    if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)) and not base_stop:
-                        base_stop = True
-                        test_base_scores.append(answer_reward if base_action == 0 else 0)
-                        if base_action == 0 and answer_reward == 1.0:
-                            pass
-                            #test_base_correct.append(test_id)
+                        if (action == 0 or (action == 1 and question_reward == cq_penalty)):
+                            stop = True
+                            test_scores.append(answer_reward if action == 0 else 0)
+                            if action == 0 and answer_reward == 1.0:
+                                pass
+                                #test_correct.append(test_id)
+                        
+                    if not base_stop:
                         test_base_worse.append(1 if (base_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (base_action == 1  and question_reward == cq_penalty) else 0)
-
-                    if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)) and not score_stop:
-                        score_stop = True
-                        test_score_scores.append(answer_reward if score_action == 0 else 0)
-                        if score_action == 0 and answer_reward == 1.0:
-                            pass
-                            #test_score_correct.append(test_id)
+                        if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)):
+                            base_stop = True
+                            test_base_scores.append(answer_reward if base_action == 0 else 0)
+                            if base_action == 0 and answer_reward == 1.0:
+                                pass
+                                #test_base_correct.append(test_id)
+                    
+                    if not score_stop:
                         test_score_worse.append(1 if (score_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (score_action == 1  and question_reward == cq_penalty) else 0)
-                    
-                    if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)) and not text_stop:
-                        text_stop = True
-                        test_text_scores.append(answer_reward if text_action == 0 else 0)
-                        if text_action == 0 and answer_reward == 1.0:
-                            pass
-                            #test_text_correct.append(test_id)
+                        if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)):
+                            score_stop = True
+                            test_score_scores.append(answer_reward if score_action == 0 else 0)
+                            if score_action == 0 and answer_reward == 1.0:
+                                pass
+                                #test_score_correct.append(test_id)
+                        
+                    if not text_stop:
                         test_text_worse.append(1 if (text_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (text_action == 1  and question_reward == cq_penalty) else 0)
-
+                        if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)):
+                            text_stop = True
+                            test_text_scores.append(answer_reward if text_action == 0 else 0)
+                            if text_action == 0 and answer_reward == 1.0:
+                                pass
+                                #test_text_correct.append(test_id)
+                        
+                    
+                    # deterministic methods evaluation
                     if n_round == 0:
                         test_q0_scores.append(answer_reward)
                         test_q0_worse.append(1 if answer_reward < float(1/args.topn) and question_reward == cq_reward else 0)

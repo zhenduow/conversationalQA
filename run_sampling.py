@@ -9,14 +9,16 @@ import resource
 import csv
 import os
 import torch as T
+import OpenMatch as om
 from transformers import AutoTokenizer, AutoModel
 from scipy.special import softmax
 import sys
-import time
 from parlai.scripts.interactive import Interactive, rerank
 from copy import deepcopy
 import argparse
 import psutil
+import gc
+
 observation_dim = 768
 action_num = 2
 cq_reward = 0.11
@@ -24,7 +26,6 @@ cq_penalty = cq_reward - 1
 agent_gamma = -cq_penalty
 train_iter = 50
 batch_size = 100
-max_round = 5 # max conversation round
 max_train_size = 10000
 max_test_size = int(0.25*max_train_size)
 
@@ -32,35 +33,48 @@ def limit_memory(maxsize):
     soft, hard = resource.getrlimit(resource.RLIMIT_AS) 
     resource.setrlimit(resource.RLIMIT_AS, (maxsize, hard)) 
 
-def generate_embedding_no_grad(text, tokenizer, embedding_model):
+def generate_embedding_no_grad(text, tokenizer, embedding_model, device):
+    '''
+    Generate embedding using torch transformer.
+    '''
     with T.no_grad():
-        tokenized_context_ = T.tensor([tokenizer.encode(text, add_special_tokens=True)])
-        context_embedding_ = T.squeeze(embedding_model(tokenized_context_)[0])[0] 
+        tokenized_context_ = T.tensor([tokenizer.encode(text, add_special_tokens=True)]).to(device)
+        context_embedding_ = T.squeeze(embedding_model(tokenized_context_)[0])[0].detach().cpu()
         del tokenized_context_
+        T.cuda.empty_cache()
+        gc.collect()
         return context_embedding_
 
 def read_from_memory(query, context, memory):
+    '''
+    Read query, context, question, answer ranks and ranking scores from memory
+    '''
     return memory[query]['embedding'], memory[query][context]['embedding'],\
         memory[query][context]['questions'], memory[query][context]['answers'],\
         memory[query][context]['questions_embeddings'],memory[query][context]['answers_embeddings'],\
         memory[query][context]['questions_scores'], memory[query][context]['answers_scores']
 
-def save_to_memory(query, context, memory, questions, answers, questions_scores, answers_scores, tokenizer, embedding_model):
+def save_to_memory(query, context, memory, questions, answers, questions_scores, answers_scores, tokenizer, embedding_model, device):
+    '''
+    Save query, context, question, answer ranks and ranking scores to memory for running speed.
+    '''
     if query not in memory.keys():
         memory[query] = {}
         with T.no_grad():
-            tokenized_query = T.tensor([tokenizer.encode(query, add_special_tokens=True)])
-            memory[query]['embedding'] = T.squeeze(embedding_model(tokenized_query)[0])[0]
-    
+            tokenized_query = T.tensor([tokenizer.encode(query, add_special_tokens=True)]).to(device)
+            memory[query]['embedding'] = T.squeeze(embedding_model(tokenized_query)[0])[0].detach().cpu()
+            T.cuda.empty_cache()
     memory[query][context] = {}
     with T.no_grad():
-        memory[query][context]['embedding'] = T.squeeze(embedding_model(T.tensor([tokenizer.encode(context, add_special_tokens=True)]))[0])[0]
-        memory[query][context]['questions_embeddings'] = [T.squeeze(embedding_model(T.tensor([tokenizer.encode(questions[i], add_special_tokens=True)]))[0])[0] for i in range(3)]
-        memory[query][context]['answers_embeddings'] = [T.squeeze(embedding_model(T.tensor([tokenizer.encode(answers[0], add_special_tokens=True)]))[0])[0]]
-    memory[query][context]['questions'] = questions
-    memory[query][context]['answers'] = answers
-    memory[query][context]['questions_scores'] = T.tensor(questions_scores)
-    memory[query][context]['answers_scores'] = T.tensor(answers_scores)
+        memory[query][context]['embedding'] = T.squeeze(embedding_model(T.tensor([tokenizer.encode(context, add_special_tokens=True)]).to(device))[0])[0].detach().cpu()
+        memory[query][context]['questions_embeddings'] = [T.squeeze(embedding_model(T.tensor([tokenizer.encode(questions[i], add_special_tokens=True)]).to(device))[0])[0].detach().cpu() for i in range(10)] # hard coding max tolerance to save memory
+        memory[query][context]['answers_embeddings'] = [T.squeeze(embedding_model(T.tensor([tokenizer.encode(answers[i], add_special_tokens=True)]).to(device))[0])[0].detach().cpu() for i in range(10)]
+        memory[query][context]['questions'] = questions
+        memory[query][context]['answers'] = answers
+        memory[query][context]['questions_scores'] = T.tensor(questions_scores).detach().cpu()
+        memory[query][context]['answers_scores'] = T.tensor(answers_scores).detach().cpu()
+        T.cuda.empty_cache()
+    gc.collect()
     return memory
 
 def generate_batch_question_candidates(batch, conversation_id, ignore_questions, total_candidates):
@@ -78,6 +92,7 @@ def generate_batch_answer_candidates(batch, conversation_id, total_candidates):
 def main(args):
     logging.getLogger().setLevel(logging.INFO)
     limit_memory(1e11)
+    device = "cuda:0" if T.cuda.is_available() else "cpu"
 
     random.seed(2020)
     if args.cv != -1:
@@ -88,6 +103,7 @@ def main(args):
         test_dataset = ConversationDataset('data/' + args.dataset_name + '-Complete/test/' , batch_size, max_test_size)
     train_size = sum([len(b['conversations'].keys()) for b in train_dataset.batches]) 
     test_size = sum([len(b['conversations'].keys()) for b in test_dataset.batches]) 
+    print(train_size, test_size)
     agent = Agent(lr = 1e-4, input_dims = (3 + args.topn) * observation_dim + 1 + args.topn, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
     score_agent = ScoreAgent(lr = 1e-4, input_dims = 1 + args.topn, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.0)
     text_agent = TextAgent(lr = 1e-4, input_dims = (3 + args.topn) * observation_dim, top_k = args.topn, n_actions=action_num, gamma = agent_gamma, weight_decay = 0.01)
@@ -123,7 +139,7 @@ def main(args):
 
     # embedding model
     tokenizer = AutoTokenizer.from_pretrained('xlnet-base-cased')
-    embedding_model = AutoModel.from_pretrained('xlnet-base-cased')
+    embedding_model = AutoModel.from_pretrained('xlnet-base-cased').to(device)
     '''
     local_vars = list(locals().items())
     for var, obj in local_vars:
@@ -172,13 +188,12 @@ def main(args):
                 context = ''
                 ignore_questions = []
                 n_round = 0
-                patience_used = 0
+                tolerance_used = 0
                 q_done = False
                 stop, base_stop, score_stop, text_stop = False,False,False,False
                 print('-------- train batch %.0f conversation %.0f/%.0f --------' % (batch_serial, batch_size*(batch_serial) + conv_serial + 1, train_size))
                 
                 while not q_done:
-                    total_tic = time.perf_counter()
                     print('-------- round %.0f --------' % (n_round))
                     if query in memory.keys():
                         if context not in memory[query].keys():
@@ -193,7 +208,7 @@ def main(args):
                                 questions, questions_scores = rerank(bi_question_reranker, query, context, question_candidates)
                                 answers, answers_scores = rerank(bi_answer_reranker, query, context, answer_candidates)
 
-                            memory = save_to_memory(query, context, memory, questions, answers, questions_scores, answers_scores, tokenizer, embedding_model)
+                            memory = save_to_memory(query, context, memory, questions, answers, questions_scores, answers_scores, tokenizer, embedding_model, device)
                             
                     else:
                         # sampling
@@ -207,7 +222,7 @@ def main(args):
                             questions, questions_scores = rerank(bi_question_reranker, query, context, question_candidates)
                             answers, answers_scores = rerank(bi_answer_reranker, query, context, answer_candidates)
                         
-                        memory = save_to_memory(query, context, memory, questions, answers, questions_scores, answers_scores, tokenizer, embedding_model)
+                        memory = save_to_memory(query, context, memory, questions, answers, questions_scores, answers_scores, tokenizer, embedding_model, device)
                     
                     query_embedding, context_embedding, questions, answers, questions_embeddings, answers_embeddings, questions_scores, answers_scores = read_from_memory(query, context, memory)
                     action = agent.choose_action(query_embedding, context_embedding, questions_embeddings, answers_embeddings, questions_scores, answers_scores)
@@ -215,16 +230,14 @@ def main(args):
                     score_action = score_agent.choose_action(questions_scores, answers_scores)
                     text_action = text_agent.choose_action(query_embedding, context_embedding, questions_embeddings, answers_embeddings)
 
-                    evaluation_tic = time.perf_counter()
-                    #context_, question_reward, q_done, good_question, patience_this_turn = user.update_state(train_id, context, 1, questions, answers, use_top_k = args.topn - patience_used)
-                    context_, question_reward, q_done, good_question, patience_this_turn = user.update_state(train_id, context, 1, questions, answers, use_top_k = args.topn)
-                    patience_used = max(patience_used + patience_this_turn, args.topn)
-                    _, answer_reward, _, _, _ = user.update_state(train_id, context, 0, questions, answers, use_top_k = args.topn - patience_used)
+                    #context_, question_reward, q_done, good_question, tolerance_this_turn = user.update_state(train_id, context, 1, questions, answers, use_top_k = args.topn - tolerance_used)
+                    context_, question_reward, q_done, good_question, tolerance_this_turn = user.update_state(train_id, context, 1, questions, answers, use_top_k = args.topn)
+                    tolerance_used = max(tolerance_used + tolerance_this_turn, args.topn)
+                    _, answer_reward, _, _, _ = user.update_state(train_id, context, 0, questions, answers, use_top_k = args.topn - tolerance_used)
                     action_reward = [answer_reward, question_reward][action]
-                    evaluation_toc = time.perf_counter()
                     print('action', action, 'base_action', base_action, 'score_action', score_action,'text_action', text_action, 'answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
 
-                    if n_round >= max_round:
+                    if n_round >= args.user_patience:
                         q_done = True
 
                     if not q_done:
@@ -242,11 +255,11 @@ def main(args):
                                 questions_, questions_scores_ = rerank(bi_question_reranker, query, context_, question_candidates)
                                 answers_, answers_scores_ = rerank(bi_answer_reranker, query, context_, answer_candidates)
                             
-                            memory = save_to_memory(query, context_, memory, questions_, answers_, questions_scores_, answers_scores_, tokenizer, embedding_model)
+                            memory = save_to_memory(query, context_, memory, questions_, answers_, questions_scores_, answers_scores_, tokenizer, embedding_model, device)
                         query_embedding, context_embedding_, questions_, answers_, questions_embeddings_, answers_embeddings_, questions_scores_, answers_scores_ = read_from_memory(query, context_, memory)
 
                     else:
-                        context_embedding_ = generate_embedding_no_grad(context_, tokenizer, embedding_model)
+                        context_embedding_ = generate_embedding_no_grad(context_, tokenizer, embedding_model, device)
                         questions_, answers_, questions_embeddings_, answers_embeddings_, questions_scores_, answers_scores_ = None, None, None, None, None, None
 
                     agent.joint_learn((query_embedding, context_embedding, questions_embeddings, answers_embeddings, questions_scores, answers_scores),\
@@ -260,48 +273,43 @@ def main(args):
                         answer_reward, question_reward,\
                         (query_embedding, context_embedding_, questions_embeddings_, answers_embeddings_))
 
-                    # non-deterministic methods evaluation
-                    if not stop:
+                    # evaluation
+                    if (action == 0 or (action == 1 and question_reward == cq_penalty)) and not stop:
+                        stop = True 
+                        train_scores.append(answer_reward if action == 0 else 0)
+                        if action == 0 and answer_reward == 1.0:
+                            #train_correct.append(train_id) 
+                            pass
                         train_worse.append(1 if (action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (action == 1  and question_reward == cq_penalty) else 0)
-                        if (action == 0 or (action == 1 and question_reward == cq_penalty)):
-                            stop = True 
-                            train_scores.append(answer_reward if action == 0 else 0)
-                            if action == 0 and answer_reward == 1.0:
-                                #train_correct.append(train_id) 
-                                pass
-                        
-                    if not base_stop:
+
+                    if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)) and not base_stop:
+                        base_stop = True
+                        train_base_scores.append(answer_reward if base_action == 0 else 0)
+                        if base_action == 0 and answer_reward == 1.0:
+                            #train_base_correct.append(train_id)
+                            pass
                         train_base_worse.append(1 if (base_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (base_action == 1  and question_reward == cq_penalty) else 0)
-                        if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)):
-                            base_stop = True
-                            train_base_scores.append(answer_reward if base_action == 0 else 0)
-                            if base_action == 0 and answer_reward == 1.0:
-                                #train_base_correct.append(train_id)
-                                pass
-                        
-                    if not score_stop:
+                    
+                    if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)) and not score_stop:
+                        score_stop = True
+                        train_score_scores.append(answer_reward if score_action == 0 else 0)
+                        if score_action == 0 and answer_reward == 1.0:
+                            pass
+                            #train_score_correct.append(train_id)
                         train_score_worse.append(1 if (score_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (score_action == 1  and question_reward == cq_penalty) else 0)
-                        if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)):
-                            score_stop = True
-                            train_score_scores.append(answer_reward if score_action == 0 else 0)
-                            if score_action == 0 and answer_reward == 1.0:
-                                pass
-                                #train_score_correct.append(train_id)
-                        
-                    if not text_stop:
+                    
+                    if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)) and not text_stop:
+                        text_stop = True
+                        train_text_scores.append(answer_reward if text_action == 0 else 0)
+                        if text_action == 0 and answer_reward == 1.0:
+                            pass
+                            #train_text_correct.append(train_id)
                         train_text_worse.append(1 if (text_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (text_action == 1  and question_reward == cq_penalty) else 0)
-                        if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)):
-                            text_stop = True
-                            train_text_scores.append(answer_reward if text_action == 0 else 0)
-                            if text_action == 0 and answer_reward == 1.0:
-                                pass
-                                #train_text_correct.append(train_id)
-                        
-                    # deterministic method evaluation
+
                     if n_round == 0:
                         train_q0_scores.append(answer_reward)
                         train_q0_worse.append(1 if answer_reward < float(1/args.topn) and question_reward == cq_reward else 0)
@@ -331,7 +339,6 @@ def main(args):
 
                     context = context_
                     n_round += 1
-                    total_toc = time.perf_counter()
             
             # save memory per batch
             if args.cv != -1:
@@ -364,6 +371,16 @@ def main(args):
         print("text acc %.6f, avgmrr %.6f, worse decisions %.6f" % 
             (np.mean([1 if score == 1 else 0 for score in train_text_scores]), np.mean(train_text_scores), np.mean(train_text_worse)))
 
+        '''
+        print(train_correct)
+        print(train_q0_correct)
+        print(train_q1_correct)
+        print(train_q2_correct)
+        print(train_oracle_correct)
+        print(train_base_correct)
+        print(train_score_correct)
+        print(train_text_correct)
+        '''
         print("avg loss", np.mean(agent.loss_history))
 
         ## test
@@ -395,7 +412,7 @@ def main(args):
                 context = ''
                 ignore_questions = []
                 n_round = 0
-                patience_used = 0
+                tolerance_used = 0
                 q_done = False
                 stop, base_stop, score_stop, text_stop = False,False,False,False
                 print('-------- test batch %.0f conversation %.0f/%.0f --------' % (batch_serial, batch_size*(batch_serial) + conv_serial + 1, test_size))
@@ -414,7 +431,7 @@ def main(args):
                                 questions, questions_scores = rerank(bi_question_reranker, query, context, question_candidates)
                                 answers, answers_scores = rerank(bi_answer_reranker, query, context, answer_candidates)
 
-                            memory = save_to_memory(query, context, memory, questions, answers, questions_scores, answers_scores, tokenizer, embedding_model)
+                            memory = save_to_memory(query, context, memory, questions, answers, questions_scores, answers_scores, tokenizer, embedding_model, device)
                             
                     else:
                         # sampling
@@ -429,7 +446,7 @@ def main(args):
                             questions, questions_scores = rerank(bi_question_reranker, query, context, question_candidates)
                             answers, answers_scores = rerank(bi_answer_reranker, query, context, answer_candidates)
                     
-                        memory = save_to_memory(query, context, memory, questions, answers, questions_scores, answers_scores, tokenizer, embedding_model)
+                        memory = save_to_memory(query, context, memory, questions, answers, questions_scores, answers_scores, tokenizer, embedding_model, device)
                     
                     query_embedding, context_embedding, questions, answers, questions_embeddings, answers_embeddings, questions_scores, answers_scores = read_from_memory(query, context, memory)
                     action = agent.choose_action(query_embedding, context_embedding, questions_embeddings, answers_embeddings, questions_scores, answers_scores)
@@ -437,14 +454,14 @@ def main(args):
                     score_action = score_agent.choose_action(questions_scores, answers_scores)
                     text_action = text_agent.choose_action(query_embedding, context_embedding, questions_embeddings, answers_embeddings)
                     
-                    #context_, question_reward, q_done, good_question, patience_this_turn = user.update_state(test_id, context, 1, questions, answers, use_top_k = args.topn - patience_used)
-                    context_, question_reward, q_done, good_question, patience_this_turn = user.update_state(test_id, context, 1, questions, answers, use_top_k = args.topn)
-                    patience_used = max(patience_used + patience_this_turn, args.topn)
-                    _, answer_reward, _, _, _ = user.update_state(test_id, context, 0, questions, answers, use_top_k = args.topn - patience_used)
+                    #context_, question_reward, q_done, good_question, tolerance_this_turn = user.update_state(test_id, context, 1, questions, answers, use_top_k = args.topn - tolerance_used)
+                    context_, question_reward, q_done, good_question, tolerance_this_turn = user.update_state(test_id, context, 1, questions, answers, use_top_k = args.topn)
+                    tolerance_used = max(tolerance_used + tolerance_this_turn, args.topn)
+                    _, answer_reward, _, _, _ = user.update_state(test_id, context, 0, questions, answers, use_top_k = args.topn - tolerance_used)
                     action_reward = [answer_reward, question_reward][action]
                     print('action', action, 'base_action', base_action, 'score_action', score_action,'text_action', text_action, 'answer reward', answer_reward, 'question reward', question_reward, 'q done', q_done)
 
-                    if n_round >= max_round:
+                    if n_round >= args.user_patience:
                         q_done = True
 
                     if not q_done:
@@ -461,52 +478,46 @@ def main(args):
                                 questions_, questions_scores_ = rerank(bi_question_reranker, query, context_, question_candidates)
                                 answers_, answers_scores_ = rerank(bi_answer_reranker, query, context_, answer_candidates)
                             
-                            memory = save_to_memory(query, context_, memory, questions_, answers_, questions_scores_, answers_scores_, tokenizer, embedding_model)
+                            memory = save_to_memory(query, context_, memory, questions_, answers_, questions_scores_, answers_scores_, tokenizer, embedding_model, device)
                         query_embedding, context_embedding_, questions_, answers_, questions_embeddings_, answers_embeddings_, questions_scores_, answers_scores_ = read_from_memory(query, context_, memory)
 
-                    # non-deterministic methods evaluation
-                    if not stop:
+                    # evaluation
+                    if (action == 0 or (action == 1 and question_reward == cq_penalty)) and not stop:
+                        stop = True
+                        test_scores.append(answer_reward if action == 0 else 0)
+                        if action == 0 and answer_reward == 1.0:
+                            pass
+                            #test_correct.append(test_id)
                         test_worse.append(1 if (action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (action == 1  and question_reward == cq_penalty) else 0)
-                        if (action == 0 or (action == 1 and question_reward == cq_penalty)):
-                            stop = True
-                            test_scores.append(answer_reward if action == 0 else 0)
-                            if action == 0 and answer_reward == 1.0:
-                                pass
-                                #test_correct.append(test_id)
-                        
-                    if not base_stop:
+
+                    if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)) and not base_stop:
+                        base_stop = True
+                        test_base_scores.append(answer_reward if base_action == 0 else 0)
+                        if base_action == 0 and answer_reward == 1.0:
+                            pass
+                            #test_base_correct.append(test_id)
                         test_base_worse.append(1 if (base_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (base_action == 1  and question_reward == cq_penalty) else 0)
-                        if (base_action == 0 or (base_action == 1 and question_reward == cq_penalty)):
-                            base_stop = True
-                            test_base_scores.append(answer_reward if base_action == 0 else 0)
-                            if base_action == 0 and answer_reward == 1.0:
-                                pass
-                                #test_base_correct.append(test_id)
-                    
-                    if not score_stop:
+
+                    if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)) and not score_stop:
+                        score_stop = True
+                        test_score_scores.append(answer_reward if score_action == 0 else 0)
+                        if score_action == 0 and answer_reward == 1.0:
+                            pass
+                            #test_score_correct.append(test_id)
                         test_score_worse.append(1 if (score_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (score_action == 1  and question_reward == cq_penalty) else 0)
-                        if (score_action == 0 or (score_action == 1 and question_reward == cq_penalty)):
-                            score_stop = True
-                            test_score_scores.append(answer_reward if score_action == 0 else 0)
-                            if score_action == 0 and answer_reward == 1.0:
-                                pass
-                                #test_score_correct.append(test_id)
-                        
-                    if not text_stop:
+                    
+                    if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)) and not text_stop:
+                        text_stop = True
+                        test_text_scores.append(answer_reward if text_action == 0 else 0)
+                        if text_action == 0 and answer_reward == 1.0:
+                            pass
+                            #test_text_correct.append(test_id)
                         test_text_worse.append(1 if (text_action == 0 and answer_reward < float(1/args.topn) and question_reward == cq_reward) \
                             or (text_action == 1  and question_reward == cq_penalty) else 0)
-                        if (text_action == 0 or (text_action == 1 and question_reward == cq_penalty)):
-                            text_stop = True
-                            test_text_scores.append(answer_reward if text_action == 0 else 0)
-                            if text_action == 0 and answer_reward == 1.0:
-                                pass
-                                #test_text_correct.append(test_id)
-                        
-                    
-                    # deterministic methods evaluation
+
                     if n_round == 0:
                         test_q0_scores.append(answer_reward)
                         test_q0_worse.append(1 if answer_reward < float(1/args.topn) and question_reward == cq_reward else 0)
@@ -585,5 +596,6 @@ if __name__ == '__main__':
     parser.add_argument('--topn', type = int, default = 1)
     parser.add_argument('--cv', type = int, default = -1)
     parser.add_argument('--reranker_name', type = str, default = 'Poly')
+    parser.add_argument('--user_patience', type = int, default = 10)
     args = parser.parse_args()
     main(args)

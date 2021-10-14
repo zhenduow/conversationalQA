@@ -4,19 +4,13 @@ from agent import Agent, BaseAgent, ScoreAgent, TextAgent
 import logging
 import numpy as np
 import random
-import json
 import resource
-import csv
 import os
 import torch as T
-import OpenMatch as om
 from transformers import AutoTokenizer, AutoModel
-from scipy.special import softmax
 import sys
 from parlai.scripts.interactive import Interactive, rerank
-from copy import deepcopy
 import argparse
-import psutil
 import gc
 
 observation_dim = 768
@@ -166,7 +160,6 @@ def main(args):
         train_worse, train_q0_worse, train_q1_worse, train_q2_worse, train_oracle_worse, train_base_worse, train_score_worse, train_text_worse = [],[],[],[],[],[],[],[]
         #train_correct, train_q0_correct, train_q1_correct, train_q2_correct, train_oracle_correct, train_base_correct, train_score_correct,train_text_correct = [],[],[],[],[],[],[],[]
         for batch_serial, batch in enumerate(train_dataset.batches):
-            print(dict(psutil.virtual_memory()._asdict()))
             if args.cv != -1:
                 if os.path.exists(args.dataset_name + '_experiments/embedding_cache/' + args.reranker_name + '/' + str(args.cv) + '/train/memory.batchsave' + str(batch_serial)):
                     with T.no_grad():

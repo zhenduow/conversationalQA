@@ -137,3 +137,23 @@ location = {Ljubljana, Slovenia},
 series = {WWW '21}
 }
 ```
+
+```
+@article{10.1145/3507357,
+author = {Wang, Zhenduo and Ai, Qingyao},
+title = {Simulating and Modeling the Risk of Conversational Search},
+year = {2022},
+issue_date = {October 2022},
+publisher = {Association for Computing Machinery},
+address = {New York, NY, USA},
+volume = {40},
+number = {4},
+issn = {1046-8188},
+url = {https://doi.org/10.1145/3507357},
+doi = {10.1145/3507357},
+month = {mar},
+articleno = {85},
+numpages = {33},
+keywords = {risk control, reinforcement learning, Conversational search}
+}
+```

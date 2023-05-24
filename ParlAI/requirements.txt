@@ -8,7 +8,7 @@ flake8-bugbear==19.8.0
 gitdb2==2.0.5
 GitPython==3.0.3
 h5py==2.10.0
-torch==1.4.0
+torch==1.13.1
 joblib==1.2.0
 nltk==3.6.6
 numpy>=1.16.0
